@@ -34,7 +34,7 @@ module.exports = {
     },
     platforms: ["android", "web"],
     extra: {
-      apiUrl: "http://10.0.2.2:5001",
+      apiUrl: "https://cancer-qa-backend-production-b6b8.up.railway.app",
       eas: {
         projectId: "b2f6d0be-a921-4bf9-a816-426a079df90f"
       }

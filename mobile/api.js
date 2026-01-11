@@ -4,10 +4,8 @@ import axios from 'axios';
 
 // For Android emulator use 10.0.2.2, for web use localhost
 const getApiUrl = () => {
-  if (Platform.OS === 'web') {
-    return 'http://localhost:5001';
-  }
-  return Constants.expoConfig?.extra?.apiUrl || 'http://10.0.2.2:5001';
+  // Use deployed Railway backend for all platforms
+  return Constants.expoConfig?.extra?.apiUrl || 'https://cancer-qa-backend-production-b6b8.up.railway.app';
 };
 
 const API_URL = getApiUrl();
