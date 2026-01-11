@@ -7,14 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pipenv
-RUN pip install pipenv
+# Copy requirements first (for better caching)
+COPY requirements.txt .
 
-# Copy dependency files first (for better caching)
-COPY ["Pipfile", "Pipfile.lock", "./"]
-
-# Install Python dependencies
-RUN pipenv install --deploy --ignore-pipfile --system
+# Install Python dependencies using requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy data files
 COPY data/CancerQA_data.csv data/CancerQA_data.csv
@@ -28,7 +25,6 @@ COPY Cancer_chatbot/ .
 
 # Copy additional files that might be needed
 COPY cli.py .
-COPY requirements.txt .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
