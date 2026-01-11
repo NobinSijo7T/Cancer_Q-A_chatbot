@@ -5,14 +5,10 @@ import json
 from time import time
 
 from groq import Groq
-from serpapi import GoogleSearch
 
 # Initialize Groq client
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
-
-# Initialize SerpAPI
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "42514f5d952b02e17097008c383392cb3f98330983d847bb9bc2f7409aeab87f")
 
 # Available models
 AVAILABLE_MODELS = {
@@ -66,36 +62,6 @@ def load_meditron():
 index = ingest.load_index()
 
 
-def search_serpapi(query):
-    """Search using SerpAPI for real-time web results"""
-    try:
-        params = {
-            "engine": "google",
-            "q": query + " cancer",  # Add cancer context
-            "google_domain": "google.com",
-            "hl": "en",
-            "gl": "us",
-            "num": 3,  # Get top 3 results
-            "api_key": SERPAPI_KEY
-        }
-        
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        
-        sources = []
-        if "organic_results" in results:
-            for result in results["organic_results"][:3]:
-                sources.append({
-                    "title": result.get("title", ""),
-                    "link": result.get("link", ""),
-                    "snippet": result.get("snippet", "")
-                })
-        
-        return sources
-    except Exception as e:
-        print(f"SerpAPI error: {e}")
-        return []
-
 def search(query):
     boost = {}
 
@@ -109,24 +75,21 @@ def search(query):
     return results
 
 prompt_template = """
-You're a CANCER expert. Answer the QUESTION based on the CONTEXT from our cancer database and additional web sources.
-Use the facts from both the CONTEXT and WEB SOURCES when answering the QUESTION.
+You're a CANCER expert. Answer the QUESTION based on the CONTEXT from our cancer database.
+Use the facts from the CONTEXT when answering the QUESTION.
 
 IMPORTANT FORMATTING RULES:
 - Use **bold** for important terms, cancer types, and key medical terms
 - Use *italics* for emphasis
 - Use numbered lists (1. 2. 3.) for sequential information or types
 - Use bullet points (•) for related items
-- Do NOT include URLs or web links in your answer - sources are shown separately
 - Structure your answer clearly with proper paragraphs
+- Be concise but comprehensive
 
 QUESTION: {question}
 
-CONTEXT FROM DATABASE:
+CONTEXT:
 {context}
-
-WEB SOURCES:
-{web_sources}
 """.strip()
 
 entry_template = """
@@ -135,22 +98,36 @@ answer: {answer}
 topic: {topic}
 """.strip()
 
-def build_prompt(query, search_results, web_sources):
+def build_prompt(query, search_results, conversation_history=None):
     context = ""
     
     for doc in search_results:
         context = context + entry_template.format(**doc) + "\n\n"
     
-    # Format web sources
-    web_context = ""
-    for idx, source in enumerate(web_sources, 1):
-        web_context += f"{idx}. {source['title']}\n   {source['snippet']}\n   URL: {source['link']}\n\n"
+    # Add conversation history context if provided
+    history_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        history_context = "\n\nPREVIOUS CONVERSATION (for context):\n"
+        # Take last 4 messages (2 Q&A pairs) to keep context manageable
+        for msg in conversation_history[-4:]:
+            if msg.get("role") == "user":
+                history_context += f"User asked: {msg.get('content', '')}\n"
+            elif msg.get("role") == "assistant":
+                # Truncate long answers in history
+                answer = msg.get('content', '')
+                if len(answer) > 200:
+                    answer = answer[:200] + "..."
+                history_context += f"Assistant answered: {answer}\n"
+        history_context += "\nNow answer the current question using this context.\n"
 
     prompt = prompt_template.format(
         question=query, 
-        context=context,
-        web_sources=web_context if web_context else "No additional web sources available."
+        context=context
     ).strip()
+    
+    if history_context:
+        prompt = history_context + prompt
+    
     return prompt
 
 
@@ -251,28 +228,25 @@ def evaluate_relevance(question, answer, model='gpt-oss'):
         result = {"Relevance": "UNKNOWN", "Explanation": "Failed to parse evaluation"}
         return result, tokens
 
-def rag(query, model='gpt-oss'):
+def rag(query, model='gpt-oss', conversation_history=None):
     """
-    Main RAG function.
+    Main RAG function with conversation memory.
     
     Args:
         query: The question to answer
         model: 'gpt-oss' (default, uses Groq) or 'meditron' (uses HuggingFace)
+        conversation_history: List of previous messages for context
     """
     t0 = time()
 
     # Search local database
     search_results = search(query)
     
-    # Search web using SerpAPI
-    web_sources = search_serpapi(query)
-    
-    # Build prompt with both sources
-    prompt = build_prompt(query, search_results, web_sources)
+    # Build prompt with context and conversation history
+    prompt = build_prompt(query, search_results, conversation_history)
     answer, token_stats = llm(prompt, model=model)
 
     relevance, rel_token_stats = evaluate_relevance(query, answer, model=model)
-
 
     t1 = time()
     took = t1 - t0
@@ -297,7 +271,6 @@ def rag(query, model='gpt-oss'):
         "eval_completion_tokens": rel_token_stats["completion_tokens"],
         "eval_total_tokens": rel_token_stats["total_tokens"],
         "openai_cost": openai_cost,
-        "sources": web_sources,  # Add web sources to response
     }
     return answer_data
 

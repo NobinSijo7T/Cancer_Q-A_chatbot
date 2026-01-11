@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: '#F3E8FF',
+    backgroundColor: '#FFE5EA', // Apple Health pink light
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 55,
-    backgroundColor: '#E9D5FF',
+    backgroundColor: '#FFB3C1', // Apple Health pink medium
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -123,24 +123,29 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#7C3AED',
+    backgroundColor: '#FF2D55', // Apple Health accent color
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#FF2D55',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
   },
   iconText: {
     fontSize: 48,
   },
   appName: {
-    fontSize: 36,
+    fontSize: 34,
     fontWeight: '700',
-    color: '#111827',
+    color: '#1C1C1E',
     marginBottom: 8,
-    letterSpacing: -1,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    fontWeight: '500',
+    fontSize: 15,
+    color: '#8E8E93',
+    fontWeight: '400',
     marginBottom: 40,
   },
   loadingContainer: {
@@ -151,7 +156,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#7C3AED',
+    backgroundColor: '#FF2D55',
   },
   loadingDotDelay1: {
     opacity: 0.6,
