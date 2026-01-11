@@ -1,7 +1,7 @@
 # Cancer_Q-A_chatbot
-LLM based Chatbot for Cancer related questions.
+LLM-based chatbot for cancer-related questions and patient education.
 
-This project was implemented for LLM Zoomcamp - a free course about LLMs and RAG.
+This project was implemented for LLM Zoomcamp – a free course about LLMs and RAG.
 
 
 <p align="center">
@@ -10,13 +10,36 @@ This project was implemented for LLM Zoomcamp - a free course about LLMs and RAG
 
 ## Project overview
 
-The Cancer Chatbot Assistant is a RAG application designed to assist users with their cancer related quetions.
+The Cancer Chatbot Assistant is a Retrieval-Augmented Generation (RAG) application designed to assist users with their cancer-related questions.
 
 The main use cases include:
 
 1. Learning about various cancer types.
-2. Precautions and diagnosis for the respective cancer types.
-3. Knowledge base on cancer related questions, terminalogy etc.
+2. Understanding precautions, risk factors, and diagnosis for different cancers.
+3. Exploring a curated knowledge base of cancer-related questions, terminology, and general information.
+
+
+## Architecture
+
+At a high level, the system consists of the following components:
+
+1. **API layer (Flask)** – REST API that exposes endpoints for asking questions (`/question`) and providing feedback (`/feedback`). Implemented in `Cancer_chatbot/app.py`.
+2. **RAG engine** – Handles retrieval and generation:
+  - Retrieves relevant Q&A entries using a lightweight in-memory search engine (Minsearch).
+  - Builds a structured prompt from the retrieved documents.
+  - Calls an LLM (via Groq or optional Meditron) to generate the final answer and a relevance evaluation.
+  - Implemented in `Cancer_chatbot/rag.py` and `Cancer_chatbot/ingest.py`.
+3. **Search index (Minsearch)** – In-memory full-text search over the Q&A dataset, implemented in `Cancer_chatbot/minsearch.py` and populated via `Cancer_chatbot/ingest.py`.
+4. **Persistence layer (PostgreSQL)** – Optional logging of conversations and user feedback for monitoring and analytics, implemented in `Cancer_chatbot/db.py` and initialized via `Cancer_chatbot/db_prep.py`.
+5. **Monitoring (Grafana)** – Dashboards for tracking usage, latency, relevance, feedback, and token/cost metrics using PostgreSQL as the data source.
+
+**Typical request flow:**
+
+1. User sends a question to `/question`.
+2. The RAG engine retrieves top-matching Q&A entries from Minsearch.
+3. A prompt is constructed and sent to the configured LLM backend.
+4. The generated answer and evaluation metadata are returned, optionally logged to PostgreSQL, and surfaced back to the client.
+5. The user may later send feedback to `/feedback`, which is stored in the database and visualized in Grafana.
 
 
 ## Dataset 
@@ -27,26 +50,93 @@ The dataset used in this project contains information about Cancer related data,
 2. Answers (large chunk of text)
 
 
-You can find the data in [`data/CancerQA_data.csv`] (data/CancerQA_data.csv) .
+You can find the data in [`data/CancerQA_data.csv`](data/CancerQA_data.csv).
 
 ## Technologies
 
 * Python 3.12
-* Docker and Docker Compose for containerization
-* [Minsearch] (https://github.com/alexeygrigorev/minsearch) for full-text search
 * Flask as the API interface (see Background for more information on Flask)
-* Grafana for monitoring and PostgreSQL as the backend for it
-* OpenAI as an LLM
+* [Minsearch](https://github.com/alexeygrigorev/minsearch) for in-memory full-text search
+* Groq-hosted LLMs (default: `llama-3.3-70b-versatile`) for answer generation and evaluation
+* Optional Meditron 7B model from HuggingFace for local/alternative medical LLM inference
+* PostgreSQL for logging conversations and feedback
+* Grafana for monitoring and visualization
+* Docker and Docker Compose for containerization and orchestration
 
 
-## Preparation
+## LLM models
 
-Since we use OpenAI, you need to provide the API key:
+The RAG engine supports two main model backends, configured in `Cancer_chatbot/rag.py`:
 
-1. Install `direnv`. If you use Ubuntu, run `sudo apt install direnv` and then `direnv hook bash >> ~/.bashrc`.
-2. Copy `.envrc_template` into `.envrc` and insert your key there.
-3. For OpenAI, it's recommended to create a new project and use a separate key.
-4. Run `direnv allow` to load the key into your environment.
+1. **Groq (default)**
+  - Model key: `gpt-oss`
+  - Backed by Groq's `llama-3.3-70b-versatile` chat model.
+  - Used for both answer generation and relevance evaluation.
+  - Requires `GROQ_API_KEY` to be set in your environment.
+
+2. **Meditron (optional, via HuggingFace)**
+  - Model key: `meditron`
+  - Uses `epfl-llm/meditron-7b` loaded through `transformers`.
+  - Intended as an experimental medical-domain LLM for on-device / custom deployments.
+  - Requires a valid HuggingFace access token (`HF_TOKEN`) with access to the model.
+
+You can switch between backends by passing the `model` argument to the `rag` function (e.g. `rag(question, model="meditron")`). The API currently defaults to `gpt-oss`.
+
+
+## Languages and key packages
+
+**Languages**
+
+* Python 3.12 (core application, RAG pipeline, ingestion, monitoring helpers)
+* SQL (PostgreSQL schema and queries inside the Python code)
+
+**Key Python packages** (see `requirements.txt` for the full list)
+
+* Web/API: `flask`, `python-dotenv`, `requests`
+* LLMs: `groq`, `openai` (legacy support), `transformers`, `torch`, `accelerate`, `huggingface_hub`
+* Data & ML utilities: `pandas`, `scikit-learn`
+* Database: `psycopg2-binary`
+* CLI: `questionary`
+* Dev & notebooks: `pytest`, `ipykernel`, `jupyter`
+
+
+## Project setup
+
+### Environment variables
+
+The application relies on a few environment variables. Typical local `.env` or `.envrc` settings include:
+
+* **RAG / LLMs**
+  * `GROQ_API_KEY` – required for the default Groq-backed model.
+  * `HF_TOKEN` – optional, required only if you want to use the Meditron model from HuggingFace.
+* **Data**
+  * `DATA_PATH` – path to the CSV dataset (default: `data/CancerQA_data.csv`).
+* **Database / monitoring (optional, for PostgreSQL + Grafana)**
+  * `POSTGRES_HOST`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+  * `USE_DB=1` to enable database logging (set to `0` or omit to disable).
+  * `RUN_TIMEZONE_CHECK` and `TZ` – optional debugging flags for time zone checks.
+
+If you use `direnv`, a typical workflow is:
+
+1. Install `direnv`. On Ubuntu: `sudo apt install direnv` and then `direnv hook bash >> ~/.bashrc`.
+2. Copy `.envrc_template` into `.envrc` and insert your keys and settings there.
+3. Run `direnv allow` to load the variables into your environment.
+
+Alternatively, you can create a standard `.env` file in the project root (loaded by `python-dotenv`).
+
+### Installing dependencies
+
+You can use either `pip` (with `requirements.txt`) or `pipenv` (original setup from LLM Zoomcamp).
+
+**Option 1 – pip + requirements.txt**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+pip install -r requirements.txt
+```
+
+**Option 2 – pipenv**
 
 For dependency management, we use pipenv, so you need to install it:
 
@@ -77,7 +167,7 @@ Then run the db_prep.py script:
 ```bash
 pipenv shell
 
-cd fitness_assistant
+cd Cancer_chatbot
 
 export POSTGRES_HOST=localhost
 python db_prep.py
@@ -158,6 +248,37 @@ docker run -it --rm \
 
 ## Using the application
 
+### 📱 Mobile App (Recommended - Easiest)
+
+The mobile app provides a beautiful, modern interface with automatic backend startup:
+
+```bash
+cd mobile
+npm install
+npm start
+```
+
+This single command will:
+1. ✅ Automatically start the Flask backend in the background
+2. ✅ Launch the Expo development server
+3. ✅ Display a QR code for mobile testing
+
+**To use:**
+- Press `w` to open in web browser
+- Press `a` to open in Android emulator
+- Scan QR code with Expo Go app on your phone
+
+Features:
+- Clean, modern UI with light theme
+- Bold and italic text formatting
+- Clickable source links from web search
+- Connection status indicator
+- Real-time chat experience
+
+See [mobile/README.md](mobile/README.md) for more details.
+
+---
+
 When the application is running, we can start using it.
 
 ### CLI
@@ -237,7 +358,7 @@ After sending it, you'll receive the acknowledgement:
 
 ## Code
 
-The code for the application is in the fitness_assistant folder:
+The code for the application is in the `Cancer_chatbot` folder:
 
 - [`app.py`](Cancer_chatbot/app.py) - the Flask API, the main entrypoint to the application
 - [`rag.py`](Cancer_chatbot/rag.py) - the main RAG logic for building the retrieving the data and building the prompt
