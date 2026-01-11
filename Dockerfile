@@ -29,11 +29,13 @@ COPY cli.py .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV DATA_PATH=data/CancerQA_data.csv
+ENV PORT=5001
 
 EXPOSE 5001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/')" || exit 1
+# Health check disabled for Render compatibility
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/')" || exit 1
 
-CMD gunicorn --bind 0.0.0.0:5001 --workers 2 --timeout 120 app:app
+# Use PORT env variable (Render sets this automatically)
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
