@@ -83,7 +83,7 @@ export default function HistoryModal({ visible, onClose, onSelectConversation })
           {/* Content */}
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#7C3AED" />
+              <ActivityIndicator size="large" color="#FF2D55" />
               <Text style={styles.loadingText}>Loading history...</Text>
             </View>
           ) : conversations.length === 0 ? (
@@ -141,11 +141,11 @@ export default function HistoryModal({ visible, onClose, onSelectConversation })
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F2F2F7',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
@@ -153,40 +153,45 @@ const styles = StyleSheet.create({
   },
   modalContentMobile: {
     maxHeight: '90%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   modalContentWeb: {
     maxHeight: '70%',
     maxWidth: 600,
     alignSelf: 'center',
     width: '100%',
-    borderRadius: 20,
+    borderRadius: 12,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '600',
-    color: '#111827',
+    color: '#1C1C1E',
+    letterSpacing: -0.2,
   },
   closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F6',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#E5E5EA',
     justifyContent: 'center',
     alignItems: 'center',
   },
   closeButtonText: {
-    fontSize: 20,
-    color: '#6B7280',
+    fontSize: 16,
+    color: '#8E8E93',
+    fontWeight: '600',
   },
   loadingContainer: {
     padding: 40,
@@ -194,22 +199,22 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 15,
+    color: '#8E8E93',
   },
   emptyContainer: {
     padding: 40,
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
-    color: '#374151',
+    color: '#1C1C1E',
     marginBottom: 8,
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#9CA3AF',
+    fontSize: 15,
+    color: '#8E8E93',
     textAlign: 'center',
   },
   conversationList: {
@@ -219,16 +224,19 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   conversationItem: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   conversationItemMobile: {
     padding: 14,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   conversationHeader: {
     flexDirection: 'row',
@@ -237,39 +245,40 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   conversationDate: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    fontWeight: '500',
+    fontSize: 13,
+    color: '#8E8E93',
+    fontWeight: '400',
   },
   relevanceBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#EF4444',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FF3B30',
     justifyContent: 'center',
     alignItems: 'center',
   },
   relevantBadge: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#34C759',
   },
   partlyBadge: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: '#FF9500',
   },
   relevanceBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   conversationQuestion: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
-    marginBottom: 8,
+    color: '#1C1C1E',
+    marginBottom: 6,
     lineHeight: 20,
+    letterSpacing: -0.2,
   },
   conversationAnswer: {
     fontSize: 14,
-    color: '#6B7280',
-    lineHeight: 20,
+    color: '#8E8E93',
+    lineHeight: 19,
   },
 });

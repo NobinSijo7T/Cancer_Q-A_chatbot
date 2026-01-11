@@ -467,6 +467,7 @@ def home():
             const messageInput = document.getElementById('messageInput');
             const sendButton = document.getElementById('sendButton');
             let conversationId = null;
+            let conversationHistory = []; // Track conversation for context
             
             function parseMarkdown(text) {
                 // Remove URLs from text (they'll be in sources)
@@ -624,7 +625,10 @@ def home():
                     const response = await fetch('/question', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({question: question})
+                        body: JSON.stringify({
+                            question: question,
+                            conversation_history: conversationHistory
+                        })
                     });
                     
                     const data = await response.json();
@@ -635,6 +639,15 @@ def home():
                     } else {
                         addMessage(data.answer, false, data.sources || []);
                         conversationId = data.conversation_id;
+                        
+                        // Update conversation history
+                        conversationHistory.push({role: 'user', content: question});
+                        conversationHistory.push({role: 'assistant', content: data.answer});
+                        
+                        // Keep only last 10 messages (5 Q&A pairs) to avoid token limits
+                        if (conversationHistory.length > 10) {
+                            conversationHistory = conversationHistory.slice(-10);
+                        }
                     }
                 } catch (error) {
                     removeTypingIndicator();
@@ -666,16 +679,53 @@ def home():
 def handle_question():
     data = request.json
     question = data["question"]
+    conversation_history = data.get("conversation_history", [])
 
     if not question:
         return jsonify({"error": "No question provided"}), 400
 
     conversation_id = str(uuid.uuid4())
-
-    # answer_data = rag(question)
+    
+    # Check for greetings
+    greetings = ['hi', 'hello', 'hey', 'hii', 'hiii', 'good morning', 'good afternoon', 'good evening', 'greetings']
+    if question.strip().lower() in greetings:
+        result = {
+            "conversation_id": conversation_id,
+            "question": question,
+            "answer": "Hello! 👋 I'm a Cancer Q&A assistant. Ask me anything about cancer types, prevention, diagnosis, or treatment.",
+            "sources": []
+        }
+        return jsonify(result)
+    
+    # Check if question is cancer-related
+    cancer_keywords = ['cancer', 'tumor', 'tumour', 'oncology', 'chemotherapy', 'radiation', 'malignant', 'benign', 
+                       'carcinoma', 'lymphoma', 'leukemia', 'melanoma', 'sarcoma', 'metastasis', 'biopsy',
+                       'mammogram', 'colonoscopy', 'remission', 'stage', 'grade', 'prognosis', 'survival',
+                       'treatment', 'symptom', 'diagnosis', 'screening', 'prevention', 'risk', 'genetic',
+                       'breast', 'lung', 'colon', 'prostate', 'skin', 'ovarian', 'cervical', 'pancreatic',
+                       'liver', 'kidney', 'bladder', 'brain', 'thyroid', 'blood', 'bone', 'stomach']
+    
+    question_lower = question.lower()
+    is_cancer_related = any(keyword in question_lower for keyword in cancer_keywords)
+    
+    # If question doesn't have cancer keywords, check conversation history
+    # This allows follow-up questions like "tell me more about that" to work
+    if not is_cancer_related and conversation_history:
+        # Check if previous conversation was about cancer
+        history_text = ' '.join([msg.get('content', '') for msg in conversation_history[-4:]])
+        is_cancer_related = any(keyword in history_text.lower() for keyword in cancer_keywords)
+    
+    if not is_cancer_related:
+        result = {
+            "conversation_id": conversation_id,
+            "question": question,
+            "answer": "🩺 I'm specifically designed to answer questions about **cancer** only. Please ask me about cancer types, symptoms, diagnosis, treatment, prevention, or related topics. I'm here to help with your cancer-related questions!",
+            "sources": []
+        }
+        return jsonify(result)
 
     try:
-        answer_data = rag(question)
+        answer_data = rag(question, conversation_history=conversation_history)
     except Exception as e:
         app.logger.error(f"Error processing question: {e}")
         return jsonify({"error": "Internal server error"}), 500

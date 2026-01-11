@@ -37,10 +37,7 @@
       "web"
     ],
     "extra": {
-      "apiUrl": "http://10.0.2.2:5001",
-      "eas": {
-        "projectId": "b2f6d0be-a921-4bf9-a816-426a079df90f"
-      }
+      "apiUrl": "http://10.0.2.2:5001"
     }
   }
 }

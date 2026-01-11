@@ -36,7 +36,7 @@ module.exports = {
     extra: {
       apiUrl: "https://cancer-qa-backend-production-b6b8.up.railway.app",
       eas: {
-        projectId: "b2f6d0be-a921-4bf9-a816-426a079df90f"
+        projectId: "5fc9f108-69ce-4bc2-9965-7dfc19d11ca9"
       }
     },
     plugins: [
