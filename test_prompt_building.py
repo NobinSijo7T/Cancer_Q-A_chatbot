@@ -50,11 +50,8 @@ topic: {topic}
                 history_context += f"Assistant answered: {answer}\n"
         history_context += "\nNow answer the current question using this context.\n"
     
-    # Build the full prompt
+    # Build the user prompt (system instructions are sent separately in rag.llm for Groq)
     prompt_template = """
-You're a CANCER expert. Answer the QUESTION based on the CONTEXT from our cancer database.
-Use the facts from the CONTEXT when answering the QUESTION.
-
 QUESTION: {question}
 
 CONTEXT:

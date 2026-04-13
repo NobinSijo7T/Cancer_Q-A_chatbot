@@ -13,6 +13,8 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false  # Set manually in dashboard for security
+      - key: GROQ_API_KEY_FALLBACK
+        sync: false  # Optional second key if primary fails (rate limit, auth, etc.)
       - key: SERPAPI_KEY
         sync: false
       - key: HF_TOKEN

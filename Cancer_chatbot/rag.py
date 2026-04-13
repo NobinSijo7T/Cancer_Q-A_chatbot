@@ -1,14 +1,35 @@
 import ingest
 
 import os
+import re
 import json
 from time import time
 
 from groq import Groq
 
-# Initialize Groq client
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY)
+
+def _groq_api_keys():
+    primary = (os.getenv("GROQ_API_KEY") or "").strip()
+    fallback = (os.getenv("GROQ_API_KEY_FALLBACK") or "").strip()
+    keys = []
+    if primary:
+        keys.append(primary)
+    if fallback and fallback not in keys:
+        keys.append(fallback)
+    return keys
+
+
+def _groq_error_suggests_try_next_key(exc):
+    code = getattr(exc, "status_code", None)
+    if code is not None:
+        if code == 400:
+            return False
+        return code in (401, 403, 429, 408, 500, 502, 503, 504)
+    name = type(exc).__name__
+    return any(
+        part in name
+        for part in ("Connection", "Timeout", "Connect", "RemoteProtocol")
+    )
 
 # Available models
 AVAILABLE_MODELS = {
@@ -74,23 +95,108 @@ def search(query):
 
     return results
 
+# System instructions for the /question RAG endpoint (adaptive length, safety, tone).
+ASSISTANT_SYSTEM_PROMPT = """
+You are an AI-powered cancer-focused medical assistant. You provide educational and supportive health information only. Your responses must adapt in length and depth to the user's question while maintaining medical safety and clarity.
+
+## Adaptive response length (strict)
+1. **Simple queries** (definitions like "what is X", "what does benign mean", yes/no, or one short factual ask): Reply in **2–4 short sentences total**. **No** long paragraphs, **no** numbered lists, **no** bullet lists, **no** rare case examples or deep CONTEXT excerpts unless the user explicitly asked for detail (e.g. "explain in depth", "full overview"). Prefer a plain definition plus one-sentence contrast if needed (e.g. benign vs malignant), then one disclaimer sentence.
+2. **Detailed queries** only when the user clearly asks for depth (stages, treatment options, compare approaches, "explain fully", multiple sub-questions, or several symptoms with context): Then use structured paragraphs and/or bullets/numbered lists.
+3. If the question is simple but CONTEXT contains long stories or rare tumors, **ignore** those details unless the user asked for them.
+
+## Symptom-based interactions (strict)
+- **One or two symptoms** reported in a personal way (I/my/I've been…): **Do not** name cancer types, **do not** say fatigue or similar "can occur in" breast cancer, lung cancer, melanoma, etc., **do not** list ways cancer might cause the symptom. Reply in **2–5 short sentences**: acknowledge briefly, explain one symptom is not enough, ask focused follow-up questions (duration, progression, other symptoms, medications, age/relevant risks). End with the usual disclaimer. **Ignore PREVIOUS CONVERSATION** if it would push you toward cancer examples for this turn—safety comes first.
+- Only when the user has given **rich context** (several symptoms, timeline, clear request for differential-style education) may you discuss **possible** categories with probabilistic language. Never a definitive diagnosis.
+
+## Tone and language
+- Be empathetic, supportive, and professional. Avoid alarming or definitive statements such as "You have cancer."
+
+## Medical disclaimer
+- When discussing symptoms or possible cancer-related risks, include a brief disclaimer such as: "This information is for educational purposes only and should not be considered a medical diagnosis. Please consult a qualified healthcare professional for personalized medical advice." (For very short answers, one concise disclaimer sentence is enough.)
+
+## Output formatting (required for the mobile app)
+The client renders inline styles only when you use these exact markers (balanced pairs, no HTML):
+- **Bold:** wrap text in `**double asterisks**` or `__double underscores__`
+- *Italic:* wrap in `*single asterisks*` or `_single underscores_` (do not mix `***` triples; use nested pairs like `**bold *and italic* together**` if needed)
+- Lists: use `•` or numbered lines as plain text; newlines are preserved
+
+Match depth to the question: **detailed** answers should use bold/italic for key terms; **simple** answers may stay mostly plain with at most light emphasis.
+
+## Grounding
+- The user's message will include **CONTEXT** from a cancer knowledge base. Use those facts when they apply **without** copying long passages. For **simple** questions, use CONTEXT only for a tight definition, not for extended examples. If CONTEXT is thin or off-topic, still follow safety rules and give a careful, educational reply.
+
+## Constraints
+- No definitive diagnoses. Prioritize clarity for non-medical readers. Respect any explicit instructions in the user's question (e.g. safety or format requests).
+""".strip()
+
 prompt_template = """
-You're a CANCER expert. Answer the QUESTION based on the CONTEXT from our cancer database.
-Use the facts from the CONTEXT when answering the QUESTION.
-
-IMPORTANT FORMATTING RULES:
-- Use **bold** for important terms, cancer types, and key medical terms
-- Use *italics* for emphasis
-- Use numbered lists (1. 2. 3.) for sequential information or types
-- Use bullet points (•) for related items
-- Structure your answer clearly with proper paragraphs
-- Be concise but comprehensive
-
 QUESTION: {question}
 
 CONTEXT:
 {context}
 """.strip()
+
+_FIRST_PERSON_RE = re.compile(
+    r"\b(i'm|i am|i've|i\b|my|me|suffering\s+from)\b",
+    re.I,
+)
+
+_SIMPLE_DEF_START_RE = re.compile(
+    r"^\s*(what\s+is|what\s+are|what\s+does|what's|whats|define\b|meaning\s+of|what\s+do\s+you\s+mean\s+by|can\s+you\s+define)\b",
+    re.I,
+)
+
+_VAGUE_SYMPTOM_RE = re.compile(
+    r"\b(tired(ness)?|exhaust(ed|ion)?|fatigue|low\s+energy|feel(ing)?\s+tired|been\s+tired|"
+    r"can't\s+sleep|cannot\s+sleep|insomnia|headache|nausea|dizz(y|iness)|fever|chills|aches?|"
+    r"pain|cough(ing)?|lump|bleed(ing)?|lost\s+weight|weight\s+loss)\b",
+    re.I,
+)
+
+_SIMPLE_DEF_HINT = """
+
+[Response constraint — required]
+This is a simple definition or short factual question. Answer in **2–4 short sentences only**. Do **not** use bullet lists or numbered lists. Do **not** pull in long examples, rare tumors, or extended vignettes from CONTEXT unless the user explicitly asked for detail. At most lightly bold one or two terms. End with one brief disclaimer sentence."""
+
+_MINIMAL_SYMPTOM_HINT = """
+
+[Symptom triage — required]
+The user message is a brief first-person symptom or complaint. Do **not** name specific cancer types. Do **not** write that this symptom "can occur with" breast cancer, lung cancer, melanoma, lymphoma, or similar. Do **not** use prior conversation only to introduce cancer-related examples. In **2–5 short sentences**, acknowledge briefly, explain that more information is needed, ask practical follow-up questions (duration, change over time, other symptoms, medications, relevant history). One disclaimer sentence."""
+
+
+def looks_like_simple_definition_question(query: str) -> bool:
+    q = (query or "").strip()
+    if len(q) > 240:
+        return False
+    low = q.lower()
+    if "[safety instruction]" in low or "[clinical response" in low or "[response constraint" in low:
+        return False
+    if _FIRST_PERSON_RE.search(q) and _VAGUE_SYMPTOM_RE.search(q):
+        return False
+    return bool(_SIMPLE_DEF_START_RE.match(q))
+
+
+def looks_like_minimal_personal_symptom(query: str) -> bool:
+    q = (query or "").strip()
+    if len(q) > 400:
+        return False
+    low = q.lower()
+    if "[symptom triage" in low:
+        return False
+    if not _FIRST_PERSON_RE.search(q):
+        return False
+    return bool(_VAGUE_SYMPTOM_RE.search(q))
+
+
+def augment_question_for_policy(query: str) -> str:
+    if not query:
+        return query
+    extra = []
+    if looks_like_simple_definition_question(query):
+        extra.append(_SIMPLE_DEF_HINT)
+    if looks_like_minimal_personal_symptom(query):
+        extra.append(_MINIMAL_SYMPTOM_HINT)
+    return query + "".join(extra) if extra else query
 
 entry_template = """
 question: {question}
@@ -99,6 +205,7 @@ topic: {topic}
 """.strip()
 
 def build_prompt(query, search_results, conversation_history=None):
+    query = augment_question_for_policy(query)
     context = ""
     
     for doc in search_results:
@@ -131,31 +238,46 @@ def build_prompt(query, search_results, conversation_history=None):
     return prompt
 
 
-def llm_groq(prompt, model='llama-3.3-70b-versatile'):
-    """Use Groq API for text generation"""
-    completion = groq_client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.7,
-        max_tokens=1024,
-        top_p=1,
-        stream=False,
-    )
-    
-    answer = completion.choices[0].message.content
-    
-    token_stats = {
-        "prompt_tokens": completion.usage.prompt_tokens,
-        "completion_tokens": completion.usage.completion_tokens,
-        "total_tokens": completion.usage.total_tokens,
-    }
-    
-    return answer, token_stats
+def llm_groq(prompt, model='llama-3.3-70b-versatile', system=None):
+    """Use Groq API for text generation; tries GROQ_API_KEY then GROQ_API_KEY_FALLBACK."""
+    keys = _groq_api_keys()
+    if not keys:
+        raise RuntimeError(
+            "No Groq API key configured. Set GROQ_API_KEY and optionally GROQ_API_KEY_FALLBACK."
+        )
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    last_error = None
+    for api_key in keys:
+        client = Groq(api_key=api_key)
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024,
+                top_p=1,
+                stream=False,
+            )
+        except Exception as e:
+            last_error = e
+            if len(keys) > 1 and _groq_error_suggests_try_next_key(e):
+                continue
+            raise
+
+        answer = completion.choices[0].message.content
+        token_stats = {
+            "prompt_tokens": completion.usage.prompt_tokens,
+            "completion_tokens": completion.usage.completion_tokens,
+            "total_tokens": completion.usage.total_tokens,
+        }
+        return answer, token_stats
+
+    raise last_error
 
 
 def llm_meditron(prompt):
@@ -183,14 +305,15 @@ def llm_meditron(prompt):
     return answer, token_stats
 
 
-def llm(prompt, model='gpt-oss'):
+def llm(prompt, model='gpt-oss', system=None):
     """Main LLM function that routes to appropriate backend"""
     if model == 'meditron':
-        return llm_meditron(prompt)
+        combined = f"{system}\n\n{prompt}" if system else prompt
+        return llm_meditron(combined)
     else:
         # Default to Groq's gpt-oss model
         groq_model = AVAILABLE_MODELS.get(model, 'openai/gpt-oss-20b')
-        return llm_groq(prompt, groq_model)
+        return llm_groq(prompt, groq_model, system=system)
 
 
 def calculate_openai_cost(model, tokens):
@@ -244,7 +367,7 @@ def rag(query, model='gpt-oss', conversation_history=None):
     
     # Build prompt with context and conversation history
     prompt = build_prompt(query, search_results, conversation_history)
-    answer, token_stats = llm(prompt, model=model)
+    answer, token_stats = llm(prompt, model=model, system=ASSISTANT_SYSTEM_PROMPT)
 
     relevance, rel_token_stats = evaluate_relevance(query, answer, model=model)
 
