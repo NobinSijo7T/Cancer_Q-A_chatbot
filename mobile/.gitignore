@@ -11,6 +11,14 @@ npm-debug.*
 *.orig.*
 web-build/
 
+# Local build artifacts (use GitHub Releases / EAS instead of committing binaries)
+builds/
+*.apk
+*.aab
+
+# JetBrains / Android Studio (machine-local)
+.idea/
+
 # macOS
 .DS_Store
 
