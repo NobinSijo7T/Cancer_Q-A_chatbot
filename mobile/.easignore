@@ -6,7 +6,6 @@ android/.gradle/
 android/.gradle/**
 android/app/build/
 android/build/
-**/*.lock
 .git/
 .gitignore
 npm-debug.log*
