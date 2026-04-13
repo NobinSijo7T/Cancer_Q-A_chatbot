@@ -8,6 +8,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { checkBackendConnection } from './api';
 import SplashScreen from './SplashScreen';
 import QAScreen from './QAScreen';
@@ -25,7 +26,7 @@ export default function App() {
       if (!connected) {
         Alert.alert(
           'Backend Unavailable',
-          'Cannot connect to the Cancer QA backend. Please make sure the server is running.',
+          'Cannot connect to the OncoConnect backend. Please make sure the server is running.',
           [{ text: 'OK' }]
         );
       }
@@ -37,13 +38,14 @@ export default function App() {
   }
 
   return (
+    <SafeAreaProvider>
     <NavigationContainer>
       <StatusBar style="dark" />
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Cancer Q&A</Text>
+            <Text style={styles.headerTitle}>OncoConnect</Text>
             <Text style={styles.headerSubtitle}>Your Health Assistant</Text>
           </View>
           <View style={[styles.statusIndicator, backendConnected ? styles.statusConnected : styles.statusDisconnected]}>
@@ -53,9 +55,11 @@ export default function App() {
         </View>
 
         {/* Tab Navigator */}
+        <View style={styles.tabHost}>
         <Tab.Navigator
           screenOptions={{
             headerShown: false,
+            tabBarHideOnKeyboard: true,
             tabBarActiveTintColor: '#FF2D55',
             tabBarInactiveTintColor: '#8E8E93',
             tabBarStyle: {
@@ -95,8 +99,10 @@ export default function App() {
             {() => <ReportAnalysisScreen backendConnected={backendConnected} />}
           </Tab.Screen>
         </Tab.Navigator>
+        </View>
       </View>
     </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
 
@@ -104,6 +110,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  tabHost: {
+    flex: 1,
+    minHeight: 0,
   },
   header: {
     backgroundColor: '#FFFFFF',

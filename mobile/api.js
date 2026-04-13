@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import axios from 'axios';
 
 // Railway backend URL
-const API_URL = 'https://cancer-qa-backend-production-b6b8.up.railway.app';
+const API_URL = 'https://cancer-qa-backend-production-64e1.up.railway.app';
 
 console.log('Using API URL:', API_URL);
 

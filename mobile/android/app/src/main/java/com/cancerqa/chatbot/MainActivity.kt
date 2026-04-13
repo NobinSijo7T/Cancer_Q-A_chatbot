@@ -3,6 +3,8 @@ package com.cancerqa.chatbot
 import android.os.Build
 import android.os.Bundle
 
+import androidx.core.view.WindowCompat
+
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -17,6 +19,9 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+    // Ensures adjustResize works with modern edge-to-edge / targetSdk 35; avoids the keyboard
+    // drawing over the bottom input while the RN root still uses the full screen height.
+    WindowCompat.setDecorFitsSystemWindows(window, true)
   }
 
   /**

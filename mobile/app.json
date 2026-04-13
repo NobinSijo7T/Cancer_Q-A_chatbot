@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Cancer QA Chatbot",
+    "name": "OncoConnect",
     "slug": "cancer-qa-chatbot",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,6 +19,7 @@
       "bundleIdentifier": "com.cancerqa.chatbot"
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"

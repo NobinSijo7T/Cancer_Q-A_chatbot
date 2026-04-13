@@ -1,6 +1,6 @@
 module.exports = {
   expo: {
-    name: "Cancer QA Chatbot",
+    name: "OncoConnect",
     slug: "cancer-qa-chatbot",
     version: "1.0.0",
     orientation: "portrait",
@@ -19,6 +19,7 @@ module.exports = {
       bundleIdentifier: "com.cancerqa.chatbot"
     },
     android: {
+      softwareKeyboardLayoutMode: "resize",
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#FFFFFF"
@@ -34,7 +35,7 @@ module.exports = {
     },
     platforms: ["android", "web"],
     extra: {
-      apiUrl: "https://cancer-qa-backend-production-b6b8.up.railway.app",
+      apiUrl: "https://cancer-qa-backend-production-64e1.up.railway.app",
       eas: {
         projectId: "5fc9f108-69ce-4bc2-9965-7dfc19d11ca9"
       }

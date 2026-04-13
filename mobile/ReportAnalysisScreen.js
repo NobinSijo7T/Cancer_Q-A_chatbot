@@ -15,59 +15,18 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { analyzeFullReport, answerReportQuestion, processImageOCR } from './reportAI';
+import { renderRichTextElements } from './formatRichText';
 
-/**
- * Parse markdown-style text and return React Native Text components
- * Supports **bold** and *italic* formatting
- */
+/** Markdown-style **bold**, *italic*, __bold__, _italic_ inside analysis text */
 const FormattedText = ({ children, style }) => {
   if (!children || typeof children !== 'string') {
     return <Text style={style}>{children}</Text>;
   }
-
-  const parseText = (text) => {
-    const parts = [];
-    let remaining = text;
-    let key = 0;
-
-    // Pattern to match **bold** or *italic* (but not ** inside **)
-    const regex = /(\*\*(.+?)\*\*|\*([^*]+?)\*)/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      // Add text before the match
-      if (match.index > lastIndex) {
-        parts.push(
-          <Text key={key++}>{text.substring(lastIndex, match.index)}</Text>
-        );
-      }
-
-      // Check if it's bold (**text**) or italic (*text*)
-      if (match[2]) {
-        // Bold text
-        parts.push(
-          <Text key={key++} style={{ fontWeight: 'bold' }}>{match[2]}</Text>
-        );
-      } else if (match[3]) {
-        // Italic text
-        parts.push(
-          <Text key={key++} style={{ fontStyle: 'italic' }}>{match[3]}</Text>
-        );
-      }
-
-      lastIndex = regex.lastIndex;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(<Text key={key++}>{text.substring(lastIndex)}</Text>);
-    }
-
-    return parts.length > 0 ? parts : text;
-  };
-
-  return <Text style={style}>{parseText(children)}</Text>;
+  const rich = renderRichTextElements(children, {
+    boldText: { fontWeight: '700' },
+    italicText: { fontStyle: 'italic' },
+  });
+  return <Text style={style}>{rich ?? children}</Text>;
 };
 
 export default function ReportAnalysisScreen({ backendConnected }) {

@@ -76,7 +76,7 @@ export default function SplashScreen({ onFinish }) {
         </View>
 
         {/* App Name */}
-        <Text style={styles.appName}>Cancer QA</Text>
+        <Text style={styles.appName}>OncoConnect</Text>
         <Text style={styles.subtitle}>Your Health Assistant</Text>
 
         {/* Loading Indicator */}
