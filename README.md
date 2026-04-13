@@ -1,507 +1,195 @@
-# Cancer_Q-A_chatbot
-LLM-based chatbot for cancer-related questions and patient education.
-
-This project was implemented for LLM Zoomcamp – a free course about LLMs and RAG.
-
-
-<p align="center">
-  <img src="images/demo.png">
-</p>
-
-## Project overview
-
-The Cancer Chatbot Assistant is a Retrieval-Augmented Generation (RAG) application designed to assist users with their cancer-related questions.
-
-The main use cases include:
-
-1. Learning about various cancer types.
-2. Understanding precautions, risk factors, and diagnosis for different cancers.
-3. Exploring a curated knowledge base of cancer-related questions, terminology, and general information.
-
-
-## Architecture
-
-At a high level, the system consists of the following components:
-
-1. **API layer (Flask)** – REST API that exposes endpoints for asking questions (`/question`) and providing feedback (`/feedback`). Implemented in `Cancer_chatbot/app.py`.
-2. **RAG engine** – Handles retrieval and generation:
-  - Retrieves relevant Q&A entries using a lightweight in-memory search engine (Minsearch).
-  - Builds a structured prompt from the retrieved documents.
-  - Calls an LLM (via Groq or optional Meditron) to generate the final answer and a relevance evaluation.
-  - Implemented in `Cancer_chatbot/rag.py` and `Cancer_chatbot/ingest.py`.
-3. **Search index (Minsearch)** – In-memory full-text search over the Q&A dataset, implemented in `Cancer_chatbot/minsearch.py` and populated via `Cancer_chatbot/ingest.py`.
-4. **Persistence layer (PostgreSQL)** – Optional logging of conversations and user feedback for monitoring and analytics, implemented in `Cancer_chatbot/db.py` and initialized via `Cancer_chatbot/db_prep.py`.
-5. **Monitoring (Grafana)** – Dashboards for tracking usage, latency, relevance, feedback, and token/cost metrics using PostgreSQL as the data source.
-
-**Typical request flow:**
-
-1. User sends a question to `/question`.
-2. The RAG engine retrieves top-matching Q&A entries from Minsearch.
-3. A prompt is constructed and sent to the configured LLM backend.
-4. The generated answer and evaluation metadata are returned, optionally logged to PostgreSQL, and surfaced back to the client.
-5. The user may later send feedback to `/feedback`, which is stored in the database and visualized in Grafana.
-
-
-## Dataset 
-
-The dataset used in this project contains information about Cancer related data, including:
-
-1. Question
-2. Answers (large chunk of text)
-
-
-You can find the data in [`data/CancerQA_data.csv`](data/CancerQA_data.csv).
-
-## Technologies
-
-* Python 3.12
-* Flask as the API interface (see Background for more information on Flask)
-* [Minsearch](https://github.com/alexeygrigorev/minsearch) for in-memory full-text search
-* Groq-hosted LLMs (default: `llama-3.3-70b-versatile`) for answer generation and evaluation
-* Optional Meditron 7B model from HuggingFace for local/alternative medical LLM inference
-* PostgreSQL for logging conversations and feedback
-* Grafana for monitoring and visualization
-* Docker and Docker Compose for containerization and orchestration
-
-
-## LLM models
-
-The RAG engine supports two main model backends, configured in `Cancer_chatbot/rag.py`:
-
-1. **Groq (default)**
-  - Model key: `gpt-oss`
-  - Backed by Groq's `llama-3.3-70b-versatile` chat model.
-  - Used for both answer generation and relevance evaluation.
-  - Requires `GROQ_API_KEY` to be set in your environment.
-
-2. **Meditron (optional, via HuggingFace)**
-  - Model key: `meditron`
-  - Uses `epfl-llm/meditron-7b` loaded through `transformers`.
-  - Intended as an experimental medical-domain LLM for on-device / custom deployments.
-  - Requires a valid HuggingFace access token (`HF_TOKEN`) with access to the model.
-
-You can switch between backends by passing the `model` argument to the `rag` function (e.g. `rag(question, model="meditron")`). The API currently defaults to `gpt-oss`.
-
-
-## Languages and key packages
-
-**Languages**
-
-* Python 3.12 (core application, RAG pipeline, ingestion, monitoring helpers)
-* SQL (PostgreSQL schema and queries inside the Python code)
-
-**Key Python packages** (see `requirements.txt` for the full list)
-
-* Web/API: `flask`, `python-dotenv`, `requests`
-* LLMs: `groq`, `openai` (legacy support), `transformers`, `torch`, `accelerate`, `huggingface_hub`
-* Data & ML utilities: `pandas`, `scikit-learn`
-* Database: `psycopg2-binary`
-* CLI: `questionary`
-* Dev & notebooks: `pytest`, `ipykernel`, `jupyter`
-
-
-## Project setup
-
-### Environment variables
-
-The application relies on a few environment variables. Typical local `.env` or `.envrc` settings include:
-
-* **RAG / LLMs**
-  * `GROQ_API_KEY` – required for the default Groq-backed model.
-  * `HF_TOKEN` – optional, required only if you want to use the Meditron model from HuggingFace.
-* **Data**
-  * `DATA_PATH` – path to the CSV dataset (default: `data/CancerQA_data.csv`).
-* **Database / monitoring (optional, for PostgreSQL + Grafana)**
-  * `POSTGRES_HOST`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-  * `USE_DB=1` to enable database logging (set to `0` or omit to disable).
-  * `RUN_TIMEZONE_CHECK` and `TZ` – optional debugging flags for time zone checks.
-
-If you use `direnv`, a typical workflow is:
-
-1. Install `direnv`. On Ubuntu: `sudo apt install direnv` and then `direnv hook bash >> ~/.bashrc`.
-2. Copy `.envrc_template` into `.envrc` and insert your keys and settings there.
-3. Run `direnv allow` to load the variables into your environment.
-
-Alternatively, you can create a standard `.env` file in the project root (loaded by `python-dotenv`).
-
-### Installing dependencies
-
-You can use either `pip` (with `requirements.txt`) or `pipenv` (original setup from LLM Zoomcamp).
-
-**Option 1 – pip + requirements.txt**
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
-pip install -r requirements.txt
-```
-
-**Option 2 – pipenv**
-
-For dependency management, we use pipenv, so you need to install it:
-
-```bash
-pip install pipenv
-```
-
-Once installed, you can install the app dependencies:
-
-```bash
-pipenv install --dev
-```
-
-## Running the application
-
-### Database configuration
-
-Before the application starts for the first time, the database needs to be initialized.
-
-First, run `postgres`:
-
-```bash
-docker-compose up postgres
-```
-
-Then run the db_prep.py script:
-
-```bash
-pipenv shell
-
-cd Cancer_chatbot
-
-export POSTGRES_HOST=localhost
-python db_prep.py
-```
-
-To check the content of the database, use pgcli (already installed with pipenv):
-
-```bash
-pipenv run pgcli -h localhost -U your_username -d course_assistant -W
-```
-
-You can view the schema using the \d command:
-
-```bash
-\d conversations;
-```
-
-And select from this table:
-
-```bash
-select * from conversations;
-```
-
-### Running with Docker-Compose
-
-The easiest way to run the application is with docker-compose:
-
-```bash
-docker-compose up
-```
-
-### Running locally
-
-If you want to run the application locally, start only postres and grafana:
-
-```bash
-docker-compose up postgres grafana
-```
-
-If you previously started all applications with docker-compose up, you need to stop the app:
-
-```bash
-docker-compose stop app
-```
-Now run the app on your host machine:
-
-```bash
-pipenv shell
-
-cd Cancer_chatbot
-
-export POSTGRES_HOST=localhost
-python app.py
-```
-
-### Running with Docker (without compose)
-
-Sometimes you might want to run the application in Docker without Docker Compose, e.g., for debugging purposes.
-
-First, prepare the environment by running Docker Compose as in the previous section.
-
-Next, build the image:
-
-```bash
-docker build -t cancer_chatbot .
-```
-
-And run it:
-
-```bash
-docker run -it --rm \
-    --env-file=".env" \
-    -e OPENAI_API_KEY=${OPENAI_API_KEY} \
-    -e DATA_PATH="data/CancerQA_data.csv" \
-    -p 5001:5001 \
-    cancer_chatbot
-```
-
-## Using the application
-
-### 📱 Mobile App (Recommended - Easiest)
-
-The mobile app provides a beautiful, modern interface with automatic backend startup:
+# Cancer Q&A Chatbot - Mobile App
+
+Android-first mobile client for the Cancer Q&A Chatbot, built with React Native and Expo.
+
+## App Screenshot
+
+![Mobile App Screenshot](./1.png)
+
+If your screenshot is stored in a different location, update the path above.
+
+## Tech Stack (Mobile)
+
+| Layer | Stack | Purpose |
+| --- | --- | --- |
+| Mobile Framework | React Native (0.76.9) | Cross-platform native UI |
+| Runtime | React (18.3.1) | Component/state model |
+| App Platform | Expo SDK 52 | Dev server, native runtime, build tooling |
+| Navigation | React Navigation (Native + Bottom Tabs) | Q&A and Report Analysis tabs |
+| Networking | Axios | API calls to Flask backend |
+| File and Media | Expo Image Picker, Document Picker, File System | Capture/select reports and process files |
+| Device UI Support | react-native-safe-area-context, react-native-screens | Safe area layout and screen optimization |
+| Build and Native Config | expo-build-properties, Android Gradle project | Native Android build settings |
+| Android Build/Distribution | EAS Build | Preview and release Android builds |
+
+## Dependencies Table
+
+### Production Dependencies
+
+| Package | Version | Why it is used |
+| --- | --- | --- |
+| @expo/metro-runtime | ~4.0.1 | Metro runtime support for Expo apps |
+| @react-navigation/bottom-tabs | ^6.5.11 | Bottom tab navigation UI |
+| @react-navigation/native | ^6.1.9 | Navigation container and core APIs |
+| axios | ^1.6.5 | HTTP client for backend communication |
+| expo | ~52.0.49 | Expo SDK base package |
+| expo-asset | ~11.0.0 | Asset management for app resources |
+| expo-build-properties | ~0.13.3 | Override native build properties |
+| expo-constants | ~17.0.0 | Access app/system constants |
+| expo-document-picker | ~13.0.0 | Pick report files from device |
+| expo-file-system | ~18.0.0 | Read and process report files |
+| expo-font | ~13.0.0 | Font loading support |
+| expo-image-picker | ~16.0.0 | Capture/select medical report images |
+| expo-status-bar | ~2.0.0 | Status bar styling |
+| react | 18.3.1 | React runtime |
+| react-native | 0.76.9 | Native rendering layer |
+| react-native-safe-area-context | 4.12.0 | Handle notches/safe areas |
+| react-native-screens | ~4.4.0 | Native screen primitives/performance |
+| react-native-web | ~0.19.13 | Optional web target support |
+
+### Development Dependencies
+
+| Package | Version | Why it is used |
+| --- | --- | --- |
+| @babel/core | ^7.25.2 | JS transpilation pipeline |
+| sharp | ^0.34.5 | Image processing for icon/assets workflows |
+
+## Interactive Widgets and User Flows
+
+| Widget/Component | Screen | Interaction |
+| --- | --- | --- |
+| Bottom Tab Navigator | Main App | Switch between Q&A and Report Analysis |
+| Connection Status Pill | Header | Shows backend Online/Offline state |
+| Chat Input Composer | Q&A | Type and send questions |
+| Message Stream | Q&A | Scroll through user/bot conversations |
+| Chat History Modal | Q&A | Open previous conversations and re-load responses |
+| Copy-to-Clipboard Action | Q&A | Copy generated answer text |
+| Context-Aware Safety Responses | Q&A | Guided follow-up when symptom input is incomplete |
+| Image Picker | Report Analysis | Select report image from gallery |
+| Camera Capture | Report Analysis | Capture report photo directly |
+| Manual Text Input | Report Analysis | Paste/type report text for analysis |
+| AI Analysis Progress State | Report Analysis | Step-by-step processing feedback |
+| Report Q&A Follow-up | Report Analysis | Ask additional questions based on extracted report text |
+
+## Project Setup (Mobile)
+
+### 1) Prerequisites
+
+- Node.js 18+
+- npm
+- Android Studio (for emulator) or Expo Go on Android device
+- Flask backend project available and runnable
+
+### 2) Install
 
 ```bash
 cd mobile
 npm install
+```
+
+### 3) Start (Recommended: auto backend + mobile)
+
+```bash
 npm start
 ```
 
-This single command will:
-1. ✅ Automatically start the Flask backend in the background
-2. ✅ Launch the Expo development server
-3. ✅ Display a QR code for mobile testing
+This runs `start-with-backend.js`, which starts backend + Expo together.
 
-**To use:**
-- Press `w` to open in web browser
-- Press `a` to open in Android emulator
-- Scan QR code with Expo Go app on your phone
+### 4) Start (Manual split terminals)
 
-Features:
-- Clean, modern UI with light theme
-- Bold and italic text formatting
-- Clickable source links from web search
-- Connection status indicator
-- Real-time chat experience
-
-See [mobile/README.md](mobile/README.md) for more details.
-
----
-
-When the application is running, we can start using it.
-
-### CLI
-
-We built an interactive CLI application using [questionary] (https://questionary.readthedocs.io/en/stable/) .
-
-To start it, run:
-```bash
-pipenv run python cli.py
-```
-
-You can also make it randomly select a question from our ground truth dataset:
+Terminal 1 (backend):
 
 ```bash
-pipenv run python cli.py --random
+cd Cancer_chatbot
+python app.py
 ```
 
-### Using `requests`
-
-When the application is running, you can use requests to send questions—use test.py for testing it:
+Terminal 2 (mobile only):
 
 ```bash
-pipenv run python test.py
+cd mobile
+npm run start-mobile-only
 ```
 
-It will pick a random question from the ground truth dataset and send it to the app.
+### 5) Run on Android Emulator
 
-### CURL
-
-You can also use `curl` for interacting with the API:
+1. Launch an Android emulator from Android Studio.
+2. Run:
 
 ```bash
-URL=http://localhost:5001
-QUESTION="What are different types of breast cancers?"
-DATA='{
-    "question": "'${QUESTION}'"
-}'
-
-curl -X POST \
-    -H "Content-Type: application/json" \
-    -d "${DATA}" \
-    ${URL}/question
+npm start
 ```
 
-You will see something like the following in the response:
+3. Press `a` in Expo terminal.
+
+### 6) Run on Physical Android Device
+
+1. Install Expo Go.
+2. Keep phone and computer on same network.
+3. Update `extra.apiUrl` in `app.json` from emulator URL to your machine LAN IP, for example:
 
 ```json
-{
-  "answer": "Different types of breast cancers include:\n\n1. **Ductal Carcinoma**: This is the most common type of breast cancer, which begins in the cells of the ducts.\n2. **Lobular Carcinoma**: This type of cancer originates in the lobules and is more often found in both breasts compared to other types.\n3. **Inflammatory Breast Cancer**: An uncommon type characterized by a warm, red, and swollen breast.\n4. **Ductal Carcinoma In Situ (DCIS)**: A noninvasive condition where abnormal cells are found in the lining of a breast duct.\n5. **Lobular Carcinoma In Situ (LCIS)**: Abnormal cells found in the lobules, which seldom becomes invasive cancer.\n6. **Paget Disease of the Nipple**: Involves abnormal cells in the nipple only. \n\nFor male breast cancer, common types include infiltrating ductal carcinoma, ductal carcinoma in situ, inflammatory breast cancer, and Paget disease of the nipple.",
-  "conversation_id": "6681f8f8-60ee-459a-9151-aa9b6377b53f",
-  "question": "What are different types of breast cancers?"
-}
+"apiUrl": "http://192.168.1.100:5000"
 ```
 
-### Sending feedback:
+4. Start backend and Expo.
+5. Scan QR code in Expo Go.
+
+## NPM Scripts
+
+| Script | Command | Purpose |
+| --- | --- | --- |
+| start | `node start-with-backend.js` | Start backend + Expo together |
+| start-mobile-only | `expo start` | Start only the mobile client |
+| android | `expo run:android` | Build/run Android natively |
+| ios | `expo run:ios` | Build/run iOS natively |
+| web | `expo start --web` | Run web target |
+| eas:build:android | `eas build --platform android` | Android cloud build |
+| eas:build:android:preview | `eas build --platform android --profile preview` | Preview profile cloud build |
+
+## Android Build (EAS)
 
 ```bash
-ID="6681f8f8-60ee-459a-9151-aa9b6377b53f"
-URL=http://localhost:500`
-FEEDBACK_DATA='{
-    "conversation_id": "'${ID}'",
-    "feedback": 1
-}'
-
-curl -X POST \
-    -H "Content-Type: application/json" \
-    -d "${FEEDBACK_DATA}" \
-    ${URL}/feedback
-```
-After sending it, you'll receive the acknowledgement:
-
-```json
-{
-    "message": "Feedback received for conversation 4e1cef04-bfd9-4a2c-9cdd-2771d8f70e4d: 1"
-}
+npm install -g eas-cli
+eas build:configure
+eas build --platform android --profile preview
 ```
 
-## Code
+## Important Configuration
 
-The code for the application is in the `Cancer_chatbot` folder:
+| Environment | Backend URL |
+| --- | --- |
+| Android emulator | `http://10.0.2.2:5000` |
+| Physical device | `http://<your-local-ip>:5000` |
 
-- [`app.py`](Cancer_chatbot/app.py) - the Flask API, the main entrypoint to the application
-- [`rag.py`](Cancer_chatbot/rag.py) - the main RAG logic for building the retrieving the data and building the prompt
-- [`ingest.py`](Cancer_chatbot/ingest.py) - loading the data into the knowledge base
-- [`minsearch.py`](Cancer_chatbot/minsearch.py)  - an in-memory search engine
-- [`db.py`](Cancer_chatbot/db.py) - the logic for logging the requests and responses to postgres
-- [`db_prep.py`](Cancer_chatbot/db_prep.py) - the script for initializing the database
+Configure this in `app.json` under `extra.apiUrl`.
 
-We also have some code in the project root directory:
+## Project Structure
 
-[`test.py`](test.py) - select a random question for testing.
-[`cli.py`](cli.py) - interactive CLI for the APP.
-
-### Interface
-
-We use Flask for serving the application as an API.
-
-Refer to the "Using the Application" section for examples on how to interact with the application.
-
-### Ingestion
-
-The ingestion script is in [`ingest.py`](Cancer_chatbot/ingest.py).
-
-Since we use an in-memory database, minsearch, as our knowledge base, we run the ingestion script at the startup of the application.
-
-It's executed inside [`rag.py`](Cancer_chatbot/rag.py) when we import it.
-
-### Experiments
-
-For experiments, we use Jupyter notebooks. They are in the notebooks folder.
-
-To start Jupyter, run:
-```bash
-cd notebooks
-pipenv run jupyter notebook
+```text
+mobile/
+|-- App.js
+|-- QAScreen.js
+|-- ReportAnalysisScreen.js
+|-- HistoryModal.js
+|-- api.js
+|-- reportAI.js
+|-- formatRichText.js
+|-- app.json
+|-- package.json
+|-- start-with-backend.js
+|-- android/
+`-- assets/
 ```
 
-We have the following notebooks:
+## Troubleshooting
 
-- [`rag-test.ipynb`](notebooks/rag-test.ipynb): The RAG flow and evaluating the system.
-- [`evaluation-data-generation.ipynb`](notebooks/evaluation-data-generation.ipynb): Generating the ground truth dataset for retrieval evaluation.
+| Problem | Checks |
+| --- | --- |
+| Cannot connect to backend | Verify backend on port 5000, CORS enabled, correct `apiUrl`, same network |
+| Expo app issues | Run `expo start -c`, reinstall dependencies |
+| Device cannot access backend | Confirm firewall/network rules and LAN IP correctness |
 
-### Retrieval evaluation
+## License
 
-The basic approach - using `minsearch` without any boosting - gave the following metrics:
-
-- Hit rate: 91%
-- MRR: 52%
-
-The improved version (with tuned boosting):
-
-- Hit rate: 94%
-- MRR: 54%
-
-The best boosting parameters:
-
-```python
-boost = {
-        'question': 2.21,
-        'answer': 7.84
-}
-```
-
-### RAG flow evaluation
-
-We used the LLM-as-a-Judge metric to evaluate the quality of our RAG flow.
-
-For gpt-4o-mini, in a sample with 600 records, we had:
-
-- 554 (91%) RELEVANT
-- 53 (8.9%) PARTLY_RELEVANT
-- 3 (0.05%) NON_RELEVANT
-
-We also tested gpt-4o on only 118 records was recieving timeout errors:
-
-- 107 (90.5%) RELEVANT
-- 11 (9.5%) PARTLY_RELEVANT
-
-The difference is minimal, so we opted for gpt-4o-mini.
-
-## Monitoring
-
-We use Grafana for monitoring the application. 
-
-It's accessible at [localhost:3000](http://localhost:3000):
-
-- Login: "admin"
-- Password: "admin"
-
-### Dashboards
-
-<p align="center">
-  <img src="images/dash.png">
-</p>
-
-The monitoring dashboard contains several panels:
-
-1. **Last 5 Conversations (Table):** Displays a table showing the five most recent conversations, including details such as the question, answer, relevance, and timestamp. This panel helps monitor recent interactions with users.
-2. **+1/-1 (Pie Chart):** A pie chart that visualizes the feedback from users, showing the count of positive (thumbs up) and negative (thumbs down) feedback received. This panel helps track user satisfaction.
-3. **Relevancy (Gauge):** A gauge chart representing the relevance of the responses provided during conversations. The chart categorizes relevance and indicates thresholds using different colors to highlight varying levels of response quality.
-4. **OpenAI Cost (Time Series):** A time series line chart depicting the cost associated with OpenAI usage over time. This panel helps monitor and analyze the expenditure linked to the AI model's usage.
-5. **Tokens (Time Series):** Another time series chart that tracks the number of tokens used in conversations over time. This helps to understand the usage patterns and the volume of data processed.
-6. **Model Used (Bar Chart):** A bar chart displaying the count of conversations based on the different models used. This panel provides insights into which AI models are most frequently used.
-7. **Response Time (Time Series):** A time series chart showing the response time of conversations over time. This panel is useful for identifying performance issues and ensuring the system's responsiveness.
-
-### Setting up Grafana
-
-All Grafana configurations are in the [`grafana`](grafana/) folder:
-
-- [`init.py`](grafana/init.py) - for initializing the datasource and the dashboard.
-- [`dashboard.json`](grafana/dashboard.json) - the actual dashboard (taken from LLM Zoomcamp without changes).
-
-To initialize the dashboard, first ensure Grafana is
-running (it starts automatically when you do `docker-compose up`).
-
-Then run:
-
-```bash
-pipenv shell
-
-cd grafana
-
-# make sure the POSTGRES_HOST variable is not overwritten 
-env | grep POSTGRES_HOST
-
-python init.py
-```
-
-Then go to [localhost:3000](http://localhost:3000):
-
-- Login: "admin"
-- Password: "admin"
-
-When prompted, keep "admin" as the new password.
-
-## Background
-
-Here we provide background on some tech not used in the course and links for further reading.
-
-### Flask
-
-We use Flask for creating the API interface for our application. It's a web application framework for Python: we can easily create an endpoint for asking questions and use web clients (like curl or requests) for communicating with it.
-
-In our case, we can send questions to `http://localhost:5001/question`.
-
-For more information, visit the [official Flask documentation](https://flask.palletsprojects.com/).
+Part of the Cancer Q&A Chatbot project. Refer to the root project license.
