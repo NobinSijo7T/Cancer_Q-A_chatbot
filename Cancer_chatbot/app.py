@@ -1,5 +1,6 @@
 import os 
 from dotenv import load_dotenv
+import traceback
 
 load_dotenv()
 
@@ -730,7 +731,8 @@ def handle_question():
     try:
         answer_data = rag(question, conversation_history=turn_history)
     except Exception as e:
-        app.logger.error(f"Error processing question: {e}")
+        app.logger.error(f"Error processing question: {type(e).__name__}: {e}")
+        app.logger.error(traceback.format_exc())
         return jsonify({"error": "Internal server error"}), 500
     
 

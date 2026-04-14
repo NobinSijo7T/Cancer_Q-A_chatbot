@@ -21,14 +21,33 @@ def _groq_api_keys():
 
 def _groq_error_suggests_try_next_key(exc):
     code = getattr(exc, "status_code", None)
+    if code is None:
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+    if code is None:
+        code = getattr(exc, "code", None)
     if code is not None:
         if code == 400:
             return False
         return code in (401, 403, 429, 408, 500, 502, 503, 504)
     name = type(exc).__name__
+    text = f"{name} {str(exc)}".lower()
+    if any(part in name for part in ("Connection", "Timeout", "Connect", "RemoteProtocol")):
+        return True
     return any(
-        part in name
-        for part in ("Connection", "Timeout", "Connect", "RemoteProtocol")
+        hint in text
+        for hint in (
+            "unauthorized",
+            "authentication",
+            "invalid api key",
+            "invalid_api_key",
+            "forbidden",
+            "rate limit",
+            "too many requests",
+            "service unavailable",
+            "temporarily unavailable",
+            "timeout",
+            "connection",
+        )
     )
 
 # Available models
@@ -205,6 +224,29 @@ def augment_question_for_policy(query: str) -> str:
         extra.append(_MINIMAL_SYMPTOM_HINT)
     return query + "".join(extra) if extra else query
 
+FOLLOW_UP_REFERENCE_PATTERNS = [
+    r"\bthat\b",
+    r"\bit\b",
+    r"\bthis\b",
+    r"\bthose\b",
+    r"\bthese\b",
+    r"\bthe above\b",
+    r"\bprevious\b",
+    r"\bearlier\b",
+    r"\bmore about\b",
+    r"\bexplain more\b",
+    r"\btell me more\b",
+    r"\bwhat about\b",
+    r"\bwhich one\b",
+    r"\bthat one\b",
+]
+
+def should_use_conversation_history(query: str) -> bool:
+    text = (query or "").strip().lower()
+    if not text:
+        return False
+    return any(re.search(pattern, text) for pattern in FOLLOW_UP_REFERENCE_PATTERNS)
+
 entry_template = """
 question: {question}
 answer: {answer}
@@ -220,7 +262,7 @@ def build_prompt(query, search_results, conversation_history=None):
     
     # Add conversation history context if provided
     history_context = ""
-    if conversation_history and len(conversation_history) > 0:
+    if should_use_conversation_history(query) and conversation_history and len(conversation_history) > 0:
         history_context = "\n\nPREVIOUS CONVERSATION (for context):\n"
         # Take last 4 messages (2 Q&A pairs) to keep context manageable
         for msg in conversation_history[-4:]:
@@ -259,7 +301,7 @@ def llm_groq(prompt, model='llama-3.3-70b-versatile', system=None):
     messages.append({"role": "user", "content": prompt})
 
     last_error = None
-    for api_key in keys:
+    for idx, api_key in enumerate(keys, start=1):
         client = Groq(api_key=api_key)
         try:
             completion = client.chat.completions.create(
@@ -272,7 +314,9 @@ def llm_groq(prompt, model='llama-3.3-70b-versatile', system=None):
             )
         except Exception as e:
             last_error = e
-            if len(keys) > 1 and _groq_error_suggests_try_next_key(e):
+            should_try_next = len(keys) > 1 and _groq_error_suggests_try_next_key(e)
+            print(f"[groq] key attempt {idx}/{len(keys)} failed ({type(e).__name__}), retry_next={should_try_next}")
+            if should_try_next:
                 continue
             raise
 
