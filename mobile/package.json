@@ -9,10 +9,12 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "eas:build:android": "eas build --platform android",
-    "eas:build:android:preview": "eas build --platform android --profile preview"
+    "eas:build:android:preview": "eas build --platform android --profile preview",
+    "test": "jest --verbose"
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-navigation/bottom-tabs": "^6.5.11",
     "@react-navigation/native": "^6.1.9",
     "axios": "^1.6.5",
@@ -33,7 +35,28 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "babel-jest": "^30.3.0",
+    "jest": "^30.3.0",
+    "react-test-renderer": "^18.3.1",
     "sharp": "^0.34.5"
   },
-  "private": true
+  "private": true,
+  "jest": {
+    "preset": "react-native",
+    "transformIgnorePatterns": [
+      "node_modules/(?!(react-native|@react-native|@react-native-async-storage|expo|@expo|react-native-safe-area-context)/)"
+    ],
+    "moduleFileExtensions": [
+      "js",
+      "jsx",
+      "json"
+    ],
+    "testPathIgnorePatterns": [
+      "node_modules",
+      "android",
+      "builds"
+    ]
+  }
 }

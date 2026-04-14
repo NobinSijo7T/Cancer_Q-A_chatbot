@@ -9,15 +9,26 @@ import {
   Keyboard,
   Platform,
   ActivityIndicator,
-  Alert,
-  useWindowDimensions,
   Clipboard,
   PanResponder,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sendQuestion } from './api';
 import HistoryModal from './HistoryModal';
 import { renderRichTextElements } from './formatRichText';
+import { buildDynamicResponseInstruction } from './responsePrompt';
+import {
+  createConversationState,
+  shouldRunSymptomTriage,
+  runTriageStep,
+  isSymptomNarrative,
+} from './symptomTriage';
+import {
+  saveConversation,
+  clearActiveConversation,
+  clearAllData,
+} from './storage';
 
 export default function QAScreen({ backendConnected }) {
   const [messages, setMessages] = useState([]);
@@ -26,14 +37,20 @@ export default function QAScreen({ backendConnected }) {
   const [conversationId, setConversationId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [responseCache, setResponseCache] = useState({});
+  const [triageState, setTriageState] = useState(createConversationState());
+  const [contextChips, setContextChips] = useState([]);
   const scrollViewRef = useRef();
-  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [dockDragOffset, setDockDragOffset] = useState(0);
   const dockDragStartRef = useRef(0);
 
-  const isLargeScreen = width > 768;
+  const createWelcomeMessage = () => ({
+    id: '0',
+    text: 'Hello! I\'m your OncoConnect assistant. Ask me anything about cancer types, prevention, diagnosis, or treatment.\n\nI can help you with:\n- Understanding symptoms and what they might mean\n- Suggesting relevant medical tests\n- Providing actionable next steps\n- Explaining medical reports',
+    isUser: false,
+    timestamp: new Date(),
+  });
 
   /** Space reserved so messages clear the docked composer (absolute). */
   const dockReserveHeight = 96;
@@ -54,6 +71,8 @@ export default function QAScreen({ backendConnected }) {
     })
   ).current;
 
+  // ─── Keyboard listeners ───────────────────────────────────────────────────
+
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -68,18 +87,50 @@ export default function QAScreen({ backendConnected }) {
     };
   }, []);
 
+  // ─── Load persisted data on mount (always start fresh chat) ────────────────
+
   useEffect(() => {
-    setConversationId(generateId());
-    
-    setMessages([
-      {
-        id: '0',
-        text: 'Hello! I\'m your OncoConnect assistant. Ask me anything about cancer types, prevention, diagnosis, or treatment.',
-        isUser: false,
-        timestamp: new Date(),
-      },
-    ]);
+    const init = async () => {
+      // Always clear persisted chat state so a reopened app starts fresh.
+      await clearActiveConversation();
+
+      // Always start a fresh conversation
+      const newId = generateId();
+      setConversationId(newId);
+      setMessages([createWelcomeMessage()]);
+    };
+    init();
   }, []);
+
+  // ─── Auto-save on message changes ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (messages.length > 1 && conversationId) {
+      saveConversation(conversationId, messages, triageState);
+    }
+  }, [messages, conversationId, triageState]);
+
+  // ─── Context chips ────────────────────────────────────────────────────────
+
+  const updateContextChipsFromState = (state) => {
+    if (!state) return;
+    const chips = [];
+    if (state.riskFactors?.age) chips.push(`${state.riskFactors.age}yo`);
+    if (state.riskFactors?.gender) chips.push(state.riskFactors.gender);
+    if (state.riskFactors?.smoking) chips.push('smoker');
+    if (state.riskFactors?.familyHistory) chips.push('family hx');
+    if (state.symptoms?.length > 0) {
+      state.symptoms.slice(0, 3).forEach((s) => chips.push(s));
+      if (state.symptoms.length > 3) chips.push(`+${state.symptoms.length - 3} more`);
+    }
+    setContextChips(chips);
+  };
+
+  const updateContextFromTriageState = (newState) => {
+    updateContextChipsFromState(newState);
+  };
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
 
   const generateId = () => {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -99,81 +150,48 @@ export default function QAScreen({ backendConnected }) {
     }));
   };
 
-  const ACUTE_SYMPTOM_PATTERNS = [
-    { name: 'persistent cough', pattern: /\b(persistent\s+)?cough\b/i },
-    { name: 'blood in sputum', pattern: /\b(blood\s+in\s+sputum|bloody\s+sputum|hemoptysis)\b/i },
-    { name: 'shortness of breath', pattern: /\b(shortness\s+of\s+breath|breathless(ness)?)\b/i },
-    { name: 'chest pain', pattern: /\bchest\s+pain\b/i },
-    { name: 'throat pain', pattern: /\b(throat\s+pain|sore\s+throat)\b/i },
-    { name: 'red eyes', pattern: /\b(red\s+eyes?|eye\s+redness)\b/i },
-    { name: 'persistent lump', pattern: /\b(persistent\s+)?(lump|mass|swelling)\b/i },
-    { name: 'unexplained weight loss', pattern: /\b(unexplained\s+)?weight\s+loss\b/i },
-    { name: 'persistent bleeding', pattern: /\b(persistent\s+)?bleeding\b/i },
-    { name: 'difficulty swallowing', pattern: /\b(difficulty\s+swallowing|trouble\s+swallowing)\b/i },
-    { name: 'persistent hoarseness', pattern: /\b(persistent\s+)?hoarseness\b/i },
-    {
-      name: 'fatigue or tiredness',
-      pattern:
-        /\b((severe\s+)?fatigue|(tired(ness)?)|exhaust(ed|ion)?|low\s+energy|feel(ing)?\s+tired|been\s+tired)\b/i,
-    },
-  ];
+  const CANCER_SCOPE_RE =
+    /\b(cancer|tumou?r|oncology|malignan|metast|chemotherapy|radiation|immunotherapy|biopsy|screening|carcinoma|sarcoma|lymphoma|leukemia|melanoma)\b/i;
 
-  const extractAcuteSymptoms = (text) => {
-    const seen = new Set();
-    const out = [];
-    for (const item of ACUTE_SYMPTOM_PATTERNS) {
-      if (item.pattern.test(text) && !seen.has(item.name)) {
-        seen.add(item.name);
-        out.push(item.name);
-      }
-    }
-    return out;
-  };
-
-  const isPersonalSymptomMessage = (text) => {
-    const hasFirstPerson = /\b(i|i'm|i am|my|me|suffering)\b/i.test(text);
-    return hasFirstPerson && extractAcuteSymptoms(text).length > 0;
-  };
-
-  const isContextContinuation = (text) => {
-    return /\b(also|as well|still|again|previous|before|same|continued)\b/i.test(text);
-  };
+  // Broader health/medical keyword pattern to also accept symptom-related queries
+  const HEALTH_SCOPE_RE =
+    /\b(symptom|diagnosis|treatment|prognosis|surgery|hospital|doctor|medical|health|disease|illness|pain|ache|lump|bleeding|blood|cough|fatigue|weight loss|nausea|vomiting|swelling|fever|headache|diarrhea|constipation|bruising|skin changes|shortness of breath|night sweats|appetite|urination|sputum|hoarseness|throat|difficulty swallowing|pelvic|abdominal|back pain|bone|breast|test|scan|x-ray|ct scan|mri|ultrasound|biopsy|chemo|radiation|stage|benign|malignant|remission|relapse|survival rate|risk factor|prevention|early detection|mammogram|colonoscopy|pap smear|psa|marker|cell|tumor marker|oncologist|pathology|histology|genetic|mutation|hereditary|familial|metastasis|palliative|hospice|clinical trial)\b/i;
 
   const shouldUseCache = (questionText) => {
-    return !isPersonalSymptomMessage(questionText);
-  };
-
-  const enforceSingleSymptomSafety = (answer, questionText) => {
-    const acuteSymptoms = extractAcuteSymptoms(questionText);
-    if (!isPersonalSymptomMessage(questionText) || acuteSymptoms.length > 1) {
-      return answer;
-    }
-
-    const hasStrongCancerClaim =
-      /\b(you have|this is|it is)\b[^.\n]*\bcancer\b/i.test(answer) ||
-      /\b(laringeal|laryngeal|hypopharyngeal|lung|breast|prostate|colorectal|ovarian|melanoma|lymphoma|leukemia|pancreatic|liver)\s+cancer\b/i.test(answer) ||
-      /\bcancer(s)?\b[^.]{0,120}\b(including|such as|like)\b/i.test(answer) ||
-      /\b(fatigue|tired)\b[^.]{0,100}\b(breast|lung|melanoma|lymphoma|leukemia)\s+cancer\b/i.test(answer);
-
-    if (!hasStrongCancerClaim) {
-      return answer;
-    }
-
-    return `Thank you for sharing this. With only one reported concern (${acuteSymptoms[0]}), it is not appropriate to tie it to specific cancer types. One symptom can have many common, non-cancer causes.\n\nTo help you more safely, please share:\n- How long this has been going on and whether it is changing\n- Any other symptoms (fever, pain, bleeding, weight change, new lumps)\n- Sleep, stress, medications, and relevant health background\n\nThis information is for educational purposes only and should not be considered a medical diagnosis. Please consult a qualified healthcare professional.`;
+    return !isSymptomNarrative(questionText);
   };
 
   const buildContextAwareQuestion = (questionText) => {
-    const acuteSymptoms = extractAcuteSymptoms(questionText);
+    const parts = [questionText];
+    const symptomNarrative = isSymptomNarrative(questionText);
 
-    if (acuteSymptoms.length === 1 && isPersonalSymptomMessage(questionText)) {
-      return `${questionText}\n\n[Safety instruction]\nThe user currently reports only one symptom (${acuteSymptoms[0]}). Do NOT diagnose or suggest any specific cancer type yet. Use cautious language, explain that one symptom is insufficient, and ask targeted follow-up questions about duration, progression, associated symptoms, and risk factors.`;
+    // Append accumulated context so the backend has full picture
+    if (triageState.symptoms.length > 0) {
+      parts.push(`\n\n[Context — gathered across this conversation]`);
+      parts.push(`Symptoms: ${triageState.symptoms.join(', ')}`);
+
+      const rf = triageState.riskFactors;
+      if (rf.age) parts.push(`Age: ${rf.age}`);
+      if (rf.gender) parts.push(`Gender: ${rf.gender}`);
+      if (rf.smoking) parts.push(`Smoking history: yes`);
+      if (rf.familyHistory) parts.push(`Family history of cancer: yes`);
+      if (triageState.answers.duration) parts.push(`Duration: ${triageState.answers.duration}`);
+      if (triageState.answers.progression) parts.push(`Progression: ${triageState.answers.progression}`);
     }
 
-    if (acuteSymptoms.length < 3) {
-      return questionText;
+    parts.push(`\n[Consistency instruction]\nUse only the symptoms and cancer type mentioned in this current conversation. Do not assume the user has breast cancer or any other cancer unless they explicitly said so in this chat. If the user mentions a different body area, focus on that area instead of earlier assumptions.`);
+
+    // Safety instruction for limited data
+    if (symptomNarrative && triageState.symptoms.length < 3) {
+      parts.push(`\n[Safety instruction]\nThe user has limited symptom details. Do NOT suggest specific cancer types yet. Instead, provide:\n- Possible causes (both benign and serious)\n- Specific diagnostic tests they should consider\n- Warning signs to watch for\n- Lifestyle and home-care measures\nDo NOT just say "consult a doctor" — give real, useful information.`);
     }
 
-    return `${questionText}\n\n[Clinical response format request]\nThe user reports at least three acute symptoms: ${acuteSymptoms.join(', ')}.\nPlease provide:\n1. Most likely possible cancer-related causes (probabilistic, non-diagnostic) and key non-cancer alternatives.\n2. Why each possibility matches these symptoms.\n3. Urgency guidance and what to do next now (including red flags requiring urgent care).\n4. Typical diagnostic workup a clinician may consider.\n5. General treatment pathways that may be discussed if diagnosis is confirmed (educational only).\n6. A short empathetic disclaimer that this is educational, not a diagnosis.`;
+    parts.push(`\n${buildDynamicResponseInstruction(questionText, {
+      hasSymptomContext: triageState.symptoms.length > 0,
+      isSymptomNarrative: symptomNarrative,
+    })}`);
+
+    return parts.join('\n');
   };
 
   const renderFormattedText = (text) =>
@@ -181,6 +199,38 @@ export default function QAScreen({ backendConnected }) {
       boldText: styles.boldText,
       italicText: styles.italicText,
     });
+
+  // ─── New Chat ─────────────────────────────────────────────────────────────
+
+  const startNewChat = async () => {
+    const newId = generateId();
+    setConversationId(newId);
+    setTriageState(createConversationState());
+    setResponseCache({});
+    setContextChips([]);
+    await clearActiveConversation();
+    setMessages([createWelcomeMessage()]);
+  };
+
+  const handleClearChat = () => {
+    Alert.alert(
+      'Clear chat?',
+      'This will remove the current chat, tracked memory, and saved local chat history on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await clearAllData();
+            await startNewChat();
+          },
+        },
+      ]
+    );
+  };
+
+  // ─── Send message ─────────────────────────────────────────────────────────
 
   const handleSend = async () => {
     if (!inputText.trim() || loading) return;
@@ -194,20 +244,39 @@ export default function QAScreen({ backendConnected }) {
 
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
+
+    // Guard: backend offline — show inline message, no API call
+    if (!backendConnected) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          text: "⚠️ I'm currently offline. Please check your internet connection — the app retries automatically every 30 seconds.",
+          isUser: false,
+          timestamp: new Date(),
+          isError: true,
+        },
+      ]);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const acuteSymptoms = extractAcuteSymptoms(userMessage.text);
-      const personalSymptomInput = isPersonalSymptomMessage(userMessage.text);
+      const triageCandidate = shouldRunSymptomTriage(userMessage.text, triageState);
 
-      if (personalSymptomInput && acuteSymptoms.length === 1) {
-        const singleSymptomReply = `Thank you for sharing this. With only one concern (${acuteSymptoms[0]}), it is not appropriate to suggest specific cancer types or tie it to particular cancers. Many everyday and non-cancer issues can cause this.\n\nPlease share a bit more so the next answer can be safer and more useful:\n- How long this has been going on and whether it is getting worse\n- Any other symptoms (fever, pain, bleeding, weight change, new lumps, cough)\n- Sleep, stress, medications, and relevant health background\n\nThis information is for educational purposes only and should not be considered a medical diagnosis. Please consult a qualified healthcare professional.`;
+      // Strict cancer/health scope gate — the message itself must be relevant.
+      // Previous conversation history does NOT bypass this check.
+      const isCancerRelated = CANCER_SCOPE_RE.test(userMessage.text);
+      const isHealthRelated = HEALTH_SCOPE_RE.test(userMessage.text);
+      const isOngoingTriage = triageState.stage !== 'initial' && triageState.symptoms.length > 0;
 
+      if (!isCancerRelated && !isHealthRelated && !triageCandidate && !isOngoingTriage) {
         setMessages((prev) => [
           ...prev,
           {
             id: generateId(),
-            text: singleSymptomReply,
+            text: 'I\'m OncoConnect — a cancer-focused assistant. I can only help with cancer and health-related questions.\n\nPlease ask me about:\n- Cancer symptoms, types, and staging\n- Screening and diagnostic tests\n- Treatment options (chemo, radiation, surgery, etc.)\n- Risk factors and prevention\n- Understanding medical reports',
             isUser: false,
             timestamp: new Date(),
             relevance: 1,
@@ -217,21 +286,24 @@ export default function QAScreen({ backendConnected }) {
         return;
       }
 
-      if (personalSymptomInput && acuteSymptoms.length === 2) {
-        const twoSymptomReply = `Thank you for sharing this. With only two symptoms (${acuteSymptoms.join(' and ')}), it is still not possible to narrow causes safely or to discuss specific cancer types. Overlapping symptoms are common and often have non-cancer explanations.\n\nA few details would help:\n- Timeline and whether things are getting worse\n- Any other symptoms or recent illness\n- Medications, sleep, stress, and relevant history (age, smoking, family history)\n\nThis information is for educational purposes only and should not be considered a medical diagnosis. Please consult a qualified healthcare professional.`;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: generateId(),
-            text: twoSymptomReply,
-            isUser: false,
-            timestamp: new Date(),
-            relevance: 1,
-            sources: [],
-          },
-        ]);
-        return;
+      if (triageCandidate) {
+        const triageResult = runTriageStep(triageState, userMessage.text);
+        setTriageState(triageResult.nextState);
+        updateContextFromTriageState(triageResult.nextState);
+        if (triageResult.shouldBlockBackend && triageResult.reply) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: generateId(),
+              text: triageResult.reply,
+              isUser: false,
+              timestamp: new Date(),
+              relevance: 1,
+              sources: [],
+            },
+          ]);
+          return;
+        }
       }
 
       if (shouldUseCache(userMessage.text)) {
@@ -254,28 +326,27 @@ export default function QAScreen({ backendConnected }) {
         }
       }
 
-      const includeHistory = !(
-        personalSymptomInput &&
-        acuteSymptoms.length >= 1 &&
-        acuteSymptoms.length <= 2 &&
-        !isContextContinuation(userMessage.text)
-      );
-      const conversationHistory = messages
+      // Cap history to last 4 messages (2 Q&A pairs) and truncate long
+      // assistant replies so we don't blow Groq's token budget.
+      const MAX_HISTORY_CHARS = 300;
+      const rawHistory = messages
         .filter(m => m.id !== '0')
         .map(m => ({
           role: m.isUser ? 'user' : 'assistant',
-          content: m.text
+          content: m.isUser
+            ? m.text
+            : m.text.length > MAX_HISTORY_CHARS
+              ? m.text.slice(0, MAX_HISTORY_CHARS) + '…'
+              : m.text,
         }));
 
-      const outboundHistory = includeHistory ? conversationHistory : [];
-      outboundHistory.push({
-        role: 'user',
-        content: userMessage.text,
-      });
+      // Keep only the 4 most-recent turns then append current user message
+      const outboundHistory = rawHistory.slice(-4);
+      outboundHistory.push({ role: 'user', content: userMessage.text });
 
-      const contextAwareQuestion = buildContextAwareQuestion(userMessage.text);
-      const response = await sendQuestion(contextAwareQuestion, conversationId, outboundHistory);
-      const safeAnswer = enforceSingleSymptomSafety(response.answer, userMessage.text);
+      const contextAwarePrompt = buildContextAwareQuestion(userMessage.text);
+      const response = await sendQuestion(contextAwarePrompt, conversationId, outboundHistory);
+      const safeAnswer = response.answer;
       
       const botMessage = {
         id: generateId(),
@@ -296,20 +367,20 @@ export default function QAScreen({ backendConnected }) {
         setConversationId(response.conversation_id);
       }
     } catch (error) {
-      Alert.alert(
-        'Connection Error',
-        'Failed to connect to the server. Please make sure the Flask backend is running.',
-        [{ text: 'OK' }]
-      );
-      
-      const errorMessage = {
-        id: generateId(),
-        text: 'Sorry, I couldn\'t process your request. Please check your connection and try again.',
-        isUser: false,
-        timestamp: new Date(),
-        isError: true,
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      const fallbackMessage =
+        "⚠️ The OncoConnect server returned an error while processing your question. Please try again in a moment.";
+      const errorText = error?.userMessage ? `⚠️ ${error.userMessage}` : fallbackMessage;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          text: errorText,
+          isUser: false,
+          timestamp: new Date(),
+          isError: true,
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -321,6 +392,7 @@ export default function QAScreen({ backendConnected }) {
   };
 
   const handleSelectConversation = (conversation) => {
+    const nextConversationId = generateId();
     const userMsg = {
       id: generateId(),
       text: conversation.question,
@@ -334,8 +406,12 @@ export default function QAScreen({ backendConnected }) {
       isUser: false,
       timestamp: new Date(),
     };
-    
-    setMessages([...messages, userMsg, botMsg]);
+
+    setConversationId(nextConversationId);
+    setResponseCache({});
+    setTriageState(createConversationState());
+    setContextChips([]);
+    setMessages([createWelcomeMessage(), userMsg, botMsg]);
   };
 
   return (
@@ -349,13 +425,35 @@ export default function QAScreen({ backendConnected }) {
 
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Ask Questions</Text>
-          <TouchableOpacity
-            style={styles.historyButton}
-            onPress={() => setShowHistory(true)}
-          >
-            <Text style={styles.historyIcon}>📋</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={handleClearChat}
+            >
+              <Text style={styles.clearButtonText}>Clear Chat</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.historyButton}
+              onPress={() => setShowHistory(true)}
+            >
+              <Text style={styles.historyIcon}>📋</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Context Chips — show tracked health context */}
+        {contextChips.length > 0 && (
+          <View style={styles.contextChipBar}>
+            <Text style={styles.contextLabel}>Tracking:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.contextChipScroll}>
+              {contextChips.map((chip, idx) => (
+                <View key={idx} style={styles.contextChip}>
+                  <Text style={styles.contextChipText}>{chip}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         <View style={styles.chatContainer}>
           <View style={styles.messagesPane}>
@@ -402,14 +500,15 @@ export default function QAScreen({ backendConnected }) {
                       message.isError && styles.errorMessage,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.messageText,
-                        message.isUser ? styles.userMessageText : styles.botMessageText,
-                      ]}
-                    >
-                      {message.isUser ? message.text : renderFormattedText(message.text)}
-                    </Text>
+                    {message.isUser ? (
+                      <Text style={[styles.messageText, styles.userMessageText]}>
+                        {message.text}
+                      </Text>
+                    ) : (
+                      <View style={styles.botMessageContent}>
+                        {renderFormattedText(message.text)}
+                      </View>
+                    )}
 
                     {!message.isUser && !message.isError && (
                       <TouchableOpacity
@@ -491,6 +590,45 @@ export default function QAScreen({ backendConnected }) {
   );
 }
 
+const botAvatarShadowStyle = Platform.select({
+  web: {
+    boxShadow: '0px 2px 4px rgba(255,45,85,0.3)',
+  },
+  default: {
+    shadowColor: '#FF2D55',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+});
+
+const cardShadowStyle = Platform.select({
+  web: {
+    boxShadow: '0px 1px 4px rgba(0,0,0,0.05)',
+  },
+  default: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+});
+
+const dockShadowStyle = Platform.select({
+  web: {
+    boxShadow: '0px -3px 8px rgba(0,0,0,0.12)',
+  },
+  default: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 18,
+  },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -516,6 +654,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#000000',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  clearButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: '#FFE4EA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#D72655',
+  },
   historyButton: {
     width: 36,
     height: 36,
@@ -527,6 +683,40 @@ const styles = StyleSheet.create({
   historyIcon: {
     fontSize: 16,
   },
+  // ── Context Chips ─────────────────────────────────────
+  contextChipBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
+  },
+  contextLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginRight: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  contextChipScroll: {
+    flexGrow: 0,
+  },
+  contextChip: {
+    backgroundColor: 'rgba(255,45,85,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 6,
+  },
+  contextChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FF2D55',
+  },
+  // ── Chat ──────────────────────────────────────────────
   chatContainer: {
     flex: 1,
     minHeight: 0,
@@ -565,11 +755,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF2D55',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FF2D55',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    ...botAvatarShadowStyle,
   },
   userAvatar: {
     width: 36,
@@ -595,11 +781,7 @@ const styles = StyleSheet.create({
   botMessage: {
     backgroundColor: '#FFFFFF',
     borderBottomLeftRadius: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    ...cardShadowStyle,
   },
   errorMessage: {
     backgroundColor: 'rgba(255, 59, 48, 0.1)',
@@ -618,6 +800,9 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: '#FFFFFF',
+  },
+  botMessageContent: {
+    // Container for the rich-text View tree
   },
   botMessageText: {
     color: '#1C1C1E',
@@ -657,11 +842,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(0,0,0,0.12)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 18,
+    ...dockShadowStyle,
     zIndex: 1000,
   },
   dragHandleArea: {

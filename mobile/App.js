@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
   Text,
-  Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
@@ -15,22 +14,26 @@ import QAScreen from './QAScreen';
 import ReportAnalysisScreen from './ReportAnalysisScreen';
 
 const Tab = createBottomTabNavigator();
+const RETRY_INTERVAL_MS = 30000; // retry every 30 s
 
 export default function App() {
   const [backendConnected, setBackendConnected] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
+  const retryRef = useRef(null);
+
+  const attemptConnection = async () => {
+    const connected = await checkBackendConnection();
+    setBackendConnected(connected);
+    return connected;
+  };
 
   useEffect(() => {
-    checkBackendConnection().then(connected => {
-      setBackendConnected(connected);
-      if (!connected) {
-        Alert.alert(
-          'Backend Unavailable',
-          'Cannot connect to the OncoConnect backend. Please make sure the server is running.',
-          [{ text: 'OK' }]
-        );
-      }
-    });
+    // Initial check
+    attemptConnection();
+
+    // Poll every 30 s so the UI recovers automatically when the server wakes up
+    retryRef.current = setInterval(attemptConnection, RETRY_INTERVAL_MS);
+    return () => clearInterval(retryRef.current);
   }, []);
 
   if (showSplash) {
@@ -49,8 +52,8 @@ export default function App() {
             <Text style={styles.headerSubtitle}>Your Health Assistant</Text>
           </View>
           <View style={[styles.statusIndicator, backendConnected ? styles.statusConnected : styles.statusDisconnected]}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusText}>{backendConnected ? 'Online' : 'Offline'}</Text>
+            <View style={backendConnected ? styles.statusDotConnected : styles.statusDotDisconnected} />
+            <Text style={backendConnected ? styles.statusTextConnected : styles.statusTextDisconnected}>{backendConnected ? 'Online' : 'Offline'}</Text>
           </View>
         </View>
 
@@ -155,16 +158,26 @@ const styles = StyleSheet.create({
   statusDisconnected: {
     backgroundColor: 'rgba(255, 59, 48, 0.15)',
   },
-  statusDot: {
+  statusDotConnected: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: '#34C759',
   },
-  statusText: {
+  statusDotDisconnected: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FF3B30',
+  },
+  statusTextConnected: {
     fontSize: 12,
     fontWeight: '500',
     color: '#34C759',
   },
+  statusTextDisconnected: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#FF3B30',
+  },
 });
-

@@ -5,6 +5,7 @@ load_dotenv()
 
 import uuid
 import json
+import re
 from datetime import datetime
 
 from flask import Flask, request, jsonify
@@ -18,7 +19,17 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for mobile app
 
 # In-memory conversation storage (fallback when DB is disabled)
-conversation_history = []
+in_memory_conversations = []
+
+CANCER_KEYWORDS = [
+    'cancer', 'tumor', 'tumour', 'oncology', 'chemotherapy', 'radiation', 'malignant', 'benign',
+    'carcinoma', 'lymphoma', 'leukemia', 'melanoma', 'sarcoma', 'metastasis', 'biopsy',
+    'mammogram', 'colonoscopy', 'remission', 'stage', 'grade', 'prognosis', 'survival',
+    'treatment', 'symptom', 'diagnosis', 'screening', 'prevention', 'risk', 'genetic',
+    'breast', 'lung', 'colon', 'prostate', 'skin', 'ovarian', 'cervical', 'pancreatic',
+    'liver', 'kidney', 'bladder', 'brain', 'thyroid', 'blood', 'bone', 'stomach'
+]
+CANCER_KEYWORD_RE = re.compile("|".join(re.escape(k) for k in CANCER_KEYWORDS), re.I)
 
 
 @app.route("/")
@@ -679,12 +690,12 @@ def home():
 def handle_question():
     data = request.json
     question = data["question"]
-    conversation_history = data.get("conversation_history", [])
+    turn_history = data.get("conversation_history", [])
 
     if not question:
         return jsonify({"error": "No question provided"}), 400
 
-    conversation_id = str(uuid.uuid4())
+    conversation_id = data.get("conversation_id") or str(uuid.uuid4())
     
     # Check for greetings
     greetings = ['hi', 'hello', 'hey', 'hii', 'hiii', 'good morning', 'good afternoon', 'good evening', 'greetings']
@@ -698,22 +709,14 @@ def handle_question():
         return jsonify(result)
     
     # Check if question is cancer-related
-    cancer_keywords = ['cancer', 'tumor', 'tumour', 'oncology', 'chemotherapy', 'radiation', 'malignant', 'benign', 
-                       'carcinoma', 'lymphoma', 'leukemia', 'melanoma', 'sarcoma', 'metastasis', 'biopsy',
-                       'mammogram', 'colonoscopy', 'remission', 'stage', 'grade', 'prognosis', 'survival',
-                       'treatment', 'symptom', 'diagnosis', 'screening', 'prevention', 'risk', 'genetic',
-                       'breast', 'lung', 'colon', 'prostate', 'skin', 'ovarian', 'cervical', 'pancreatic',
-                       'liver', 'kidney', 'bladder', 'brain', 'thyroid', 'blood', 'bone', 'stomach']
-    
-    question_lower = question.lower()
-    is_cancer_related = any(keyword in question_lower for keyword in cancer_keywords)
+    is_cancer_related = bool(CANCER_KEYWORD_RE.search(question))
     
     # If question doesn't have cancer keywords, check conversation history
     # This allows follow-up questions like "tell me more about that" to work
-    if not is_cancer_related and conversation_history:
+    if not is_cancer_related and turn_history:
         # Check if previous conversation was about cancer
-        history_text = ' '.join([msg.get('content', '') for msg in conversation_history[-4:]])
-        is_cancer_related = any(keyword in history_text.lower() for keyword in cancer_keywords)
+        history_text = ' '.join([msg.get('content', '') for msg in turn_history[-6:]])
+        is_cancer_related = bool(CANCER_KEYWORD_RE.search(history_text))
     
     if not is_cancer_related:
         result = {
@@ -725,7 +728,7 @@ def handle_question():
         return jsonify(result)
 
     try:
-        answer_data = rag(question, conversation_history=conversation_history)
+        answer_data = rag(question, conversation_history=turn_history)
     except Exception as e:
         app.logger.error(f"Error processing question: {e}")
         return jsonify({"error": "Internal server error"}), 500
@@ -746,7 +749,7 @@ def handle_question():
     )
     
     # Also save to in-memory storage for history (fallback)
-    conversation_history.append({
+    in_memory_conversations.append({
         "id": conversation_id,
         "question": question,
         "answer": answer_data["answer"],
@@ -757,8 +760,8 @@ def handle_question():
     })
     
     # Keep only last 100 conversations in memory
-    if len(conversation_history) > 100:
-        conversation_history.pop(0)
+    if len(in_memory_conversations) > 100:
+        in_memory_conversations.pop(0)
 
     return jsonify(result)
 
@@ -795,14 +798,14 @@ def get_history():
         # If database is empty or disabled, use in-memory storage
         if not conversations:
             # Return in-memory history (reversed to show newest first)
-            conversations = list(reversed(conversation_history[-limit:]))
+            conversations = list(reversed(in_memory_conversations[-limit:]))
         
         return jsonify({"conversations": conversations})
     except Exception as e:
         app.logger.error(f"Error fetching history: {e}")
         # Fallback to in-memory storage
         limit = request.args.get('limit', 50, type=int)
-        conversations = list(reversed(conversation_history[-limit:]))
+        conversations = list(reversed(in_memory_conversations[-limit:]))
         return jsonify({"conversations": conversations})
 
 

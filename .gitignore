@@ -1,5 +1,9 @@
 .envrc
 .env
+mobile/android/build/
+mobile/android/app/build/
+mobile/.gradle-local/
+mobile/android/.gradle/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

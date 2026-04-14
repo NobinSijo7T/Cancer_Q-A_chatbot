@@ -30,6 +30,9 @@ COPY cli.py .
 ENV PYTHONUNBUFFERED=1
 ENV DATA_PATH=data/CancerQA_data.csv
 ENV PORT=5001
+ENV GROQ_API_KEY=
+ENV GROQ_API_KEY_FALLBACK=
+ENV GROQ_API_KEY_SECONDARY=
 
 EXPOSE 5001
 
@@ -37,5 +40,5 @@ EXPOSE 5001
 # HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 #     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/')" || exit 1
 
-# Use PORT env variable (Render sets this automatically)
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+# Use PORT env variable and normalize fallback key aliases for Railway
+CMD ["/bin/sh", "-c", "export GROQ_API_KEY_FALLBACK=\"${GROQ_API_KEY_FALLBACK:-${GROQ_API_KEY_SECONDARY:-${GROQ_API_KEY_2:-}}}\"; if [ -n \"$GROQ_API_KEY\" ] && [ -n \"$GROQ_API_KEY_FALLBACK\" ]; then echo 'Groq key mode: primary + fallback configured.'; elif [ -n \"$GROQ_API_KEY\" ]; then echo 'Groq key mode: primary only configured (no fallback).'; elif [ -n \"$GROQ_API_KEY_FALLBACK\" ]; then echo 'Groq key mode: fallback only configured (primary missing).'; else echo 'WARNING: No Groq keys configured. Set GROQ_API_KEY and/or GROQ_API_KEY_FALLBACK in Railway variables.'; fi; exec gunicorn --bind 0.0.0.0:${PORT:-5001} --workers 2 --timeout 120 app:app"]

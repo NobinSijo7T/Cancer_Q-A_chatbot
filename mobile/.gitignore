@@ -15,6 +15,10 @@ web-build/
 builds/
 *.apk
 *.aab
+android/build/
+android/app/build/
+.gradle-local/
+android/.gradle/
 
 # JetBrains / Android Studio (machine-local)
 .idea/

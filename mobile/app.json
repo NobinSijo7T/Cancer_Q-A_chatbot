@@ -38,7 +38,7 @@
       "web"
     ],
     "extra": {
-      "apiUrl": "http://10.0.2.2:5001"
+      "apiUrl": "https://cancer-qa-backend-production-64e1.up.railway.app"
     }
   }
 }

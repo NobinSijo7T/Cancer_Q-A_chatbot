@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Animated, StyleSheet, Dimensions, Platform } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -7,6 +7,7 @@ export default function SplashScreen({ onFinish }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.3)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+  const useNativeDriver = Platform.OS !== 'web';
 
   useEffect(() => {
     // Start animations
@@ -14,18 +15,18 @@ export default function SplashScreen({ onFinish }) {
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 800,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
         tension: 50,
         friction: 7,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 800,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
     ]).start();
 
@@ -35,12 +36,12 @@ export default function SplashScreen({ onFinish }) {
         Animated.timing(fadeAnim, {
           toValue: 0,
           duration: 600,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
         Animated.timing(scaleAnim, {
           toValue: 1.2,
           duration: 600,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
       ]).start(() => {
         if (onFinish) onFinish();
@@ -90,6 +91,19 @@ export default function SplashScreen({ onFinish }) {
   );
 }
 
+const iconShadowStyle = Platform.select({
+  web: {
+    boxShadow: '0px 4px 12px rgba(255,45,85,0.4)',
+  },
+  default: {
+    shadowColor: '#FF2D55',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -126,11 +140,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF2D55', // Apple Health accent color
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FF2D55',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    ...iconShadowStyle,
   },
   iconText: {
     fontSize: 48,
@@ -165,3 +175,4 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
 });
+
