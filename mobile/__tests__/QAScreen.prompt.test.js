@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import QAScreen from '../QAScreen';
 import { sendQuestion } from '../api';
+import { clearAllData } from '../storage';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
@@ -133,5 +134,15 @@ describe('QAScreen prompt generation', () => {
     expect(prompt).toContain('## Warning Signs');
     expect(prompt).not.toContain('## Recommended Tests');
     expect(prompt).not.toContain('## Treatment Options');
+  });
+
+  test('clear chat button wipes local memory immediately', async () => {
+    const screen = render(<QAScreen backendConnected />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Clear Chat'));
+    });
+
+    expect(clearAllData).toHaveBeenCalled();
   });
 });

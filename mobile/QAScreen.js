@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Clipboard,
   PanResponder,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sendQuestion } from './api';
@@ -213,21 +212,11 @@ export default function QAScreen({ backendConnected }) {
   };
 
   const handleClearChat = () => {
-    Alert.alert(
-      'Clear chat?',
-      'This will remove the current chat, tracked memory, and saved local chat history on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: async () => {
-            await clearAllData();
-            await startNewChat();
-          },
-        },
-      ]
-    );
+    clearAllData()
+      .then(() => startNewChat())
+      .catch((error) => {
+        console.error('Failed to clear chat:', error);
+      });
   };
 
   // ─── Send message ─────────────────────────────────────────────────────────

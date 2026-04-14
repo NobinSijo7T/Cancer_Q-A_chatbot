@@ -8,9 +8,31 @@ from time import time
 from groq import Groq
 
 
+def _normalize_api_key(value):
+    if value is None:
+        return ""
+    key = str(value).strip()
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
+        key = key[1:-1].strip()
+    return key
+
+
 def _groq_api_keys():
-    primary = (os.getenv("GROQ_API_KEY") or "").strip()
-    fallback = (os.getenv("GROQ_API_KEY_FALLBACK") or "").strip()
+    primary = _normalize_api_key(os.getenv("GROQ_API_KEY"))
+
+    # Accept multiple fallback env names to avoid deployment/config drift.
+    fallback_candidates = [
+        os.getenv("GROQ_API_KEY_FALLBACK"),
+        os.getenv("GROQ_API_KEY_SECONDARY"),
+        os.getenv("GROQ_API_KEY_2"),
+    ]
+    fallback = ""
+    for candidate in fallback_candidates:
+        key = _normalize_api_key(candidate)
+        if key:
+            fallback = key
+            break
+
     keys = []
     if primary:
         keys.append(primary)
@@ -294,6 +316,7 @@ def llm_groq(prompt, model='llama-3.3-70b-versatile', system=None):
         raise RuntimeError(
             "No Groq API key configured. Set GROQ_API_KEY and optionally GROQ_API_KEY_FALLBACK."
         )
+    print(f"[groq] loaded {len(keys)} key(s) for request")
 
     messages = []
     if system:
