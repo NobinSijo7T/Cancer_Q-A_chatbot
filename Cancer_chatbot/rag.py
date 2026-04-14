@@ -314,8 +314,13 @@ def llm_groq(prompt, model='llama-3.3-70b-versatile', system=None):
             )
         except Exception as e:
             last_error = e
-            should_try_next = len(keys) > 1 and _groq_error_suggests_try_next_key(e)
-            print(f"[groq] key attempt {idx}/{len(keys)} failed ({type(e).__name__}), retry_next={should_try_next}")
+            has_next_key = idx < len(keys)
+            reason_matched = _groq_error_suggests_try_next_key(e)
+            should_try_next = has_next_key
+            print(
+                f"[groq] key attempt {idx}/{len(keys)} failed ({type(e).__name__}), "
+                f"reason_matched={reason_matched}, retry_next={should_try_next}"
+            )
             if should_try_next:
                 continue
             raise
